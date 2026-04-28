@@ -73,3 +73,35 @@ def activation_window(
         return 0.0
 
     return window
+
+
+def continuous_activation(level: float = 1.0):
+    """Trvale zapnutá aktivace — odpovídá implantovanému řídicímu modulu,
+    který autonomně udržuje aktivaci nanorobotů bez vědomé akce uživatele
+    (např. piezo-elektrický stimulátor pod kůží, biosenzor na CGM platformě).
+    """
+    return lambda t: float(level)
+
+
+def autonomous_ems(level: float = 0.5, on_hours: float = 8.0, start_hour: float = 8.0):
+    """Autonomní neuromuskulární stimulace — denní okno, kdy implantovaný
+    EMS modul cyklí svalové skupiny. Žádná vědomá akce uživatele.
+
+    Realistický komfortní rozsah: 6–10 h/den při 30–50 % maximálního stimu.
+    """
+    on_frac = on_hours / 24.0
+    start_frac = start_hour / 24.0
+
+    def f(t: float) -> float:
+        frac_of_day = t - np.floor(t)
+        if start_frac <= frac_of_day < start_frac + on_frac:
+            return float(level)
+        return 0.0
+
+    return f
+
+
+def closed_loop_dissipation(level: float = 1.0):
+    """Trvalá autonomní termoregulace — reaguje na surplus v reálném čase.
+    Hodnota 1.0 = plné použití disipační kapacity dle aktuálního přebytku."""
+    return lambda t: float(level)

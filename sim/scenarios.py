@@ -12,7 +12,13 @@ from typing import Callable
 import numpy as np
 
 from .model import Inputs, Params, simulate, initial_state
-from .nanobot import bolus_schedule, activation_window
+from .nanobot import (
+    autonomous_ems,
+    activation_window,
+    bolus_schedule,
+    closed_loop_dissipation,
+    continuous_activation,
+)
 
 
 @dataclass
@@ -114,12 +120,67 @@ def scenario_overshoot() -> Scenario:
     )
 
 
+def scenario_autonomous() -> Scenario:
+    """**Plně autonomní režim** — uživatel jí kolik chce, necvičí. Nano sám:
+    - běží trvale (implantovaný řídicí modul, žádné FUS sezení)
+    - aktivuje UCP3 v svalu + UCP2 v játrech (forced burn 500 kcal/den)
+    - aktivuje SGLT-mimetic glykosurii při zvýšené glykémii
+    - 8 h denně cyklí svalové skupiny přes nano-EMS
+    - žádné vědomé úsilí uživatele kromě přiměřeného příjmu proteinu
+
+    Demonstruje, že systém **nahrazuje** dietu i trénink — neslouží jako
+    motivační doplněk."""
+    dose_times = [float(d) for d in range(0, 90, 7)]
+    return Scenario(
+        name="06-autonomous",
+        description=(
+            "Přebytek 2500 kcal/den, 100 g protein, ŽÁDNÝ trénink. "
+            "Nano běží trvale: forced burn + glykosurie + autonomní EMS. 90 dní."
+        ),
+        inputs=Inputs(
+            kcal=_const(2500.0),
+            protein_g=_const(100.0),
+            training=_const(0.0),
+            nano_dose=bolus_schedule(dose_times, dose=800.0),
+            activation=continuous_activation(1.0),
+            ems=autonomous_ems(level=0.5, on_hours=8.0, start_hour=8.0),
+            autonomous=closed_loop_dissipation(1.0),
+        ),
+    )
+
+
+def scenario_autonomous_lazy_glutton() -> Scenario:
+    """Extrémní test: přejídání (3000 kcal/den) + nulový trénink + nízký
+    protein (60 g/den). Ukazuje, kde je hranice systému — i s plnou
+    autonomií se přejídání nedá vyrušit, pokud chybí substrát pro sval
+    a kapacita disipace je překročena."""
+    dose_times = [float(d) for d in range(0, 90, 7)]
+    return Scenario(
+        name="07-autonomous-limit",
+        description=(
+            "Přejídání 3000 kcal/den, 60 g protein (málo), 0 trénink. "
+            "Nano na maximum. Ukazuje hranice systému. 90 dní."
+        ),
+        inputs=Inputs(
+            kcal=_const(3000.0),
+            protein_g=_const(60.0),
+            training=_const(0.0),
+            nano_dose=bolus_schedule(dose_times, dose=1000.0),
+            activation=continuous_activation(1.0),
+            ems=autonomous_ems(level=0.5, on_hours=8.0),
+            autonomous=closed_loop_dissipation(1.0),
+        ),
+    )
+
+
 ALL_SCENARIOS: list[Callable[[], Scenario]] = [
     scenario_baseline,
     scenario_diet_only,
     scenario_nano_only,
     scenario_combined,
     scenario_overshoot,
+    scenario_autonomous,
+    scenario_autonomous_lazy_glutton,
 ]
 
 
