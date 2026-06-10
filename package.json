@@ -1,0 +1,13 @@
+{
+  "name": "veky-valky",
+  "version": "1.0.0",
+  "description": "Idle hra ve stylu Age of War (HTML + Canvas + JS) s testovatelným jádrem.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test tests/engine.test.mjs",
+    "test:browser": "node tests/browser.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}

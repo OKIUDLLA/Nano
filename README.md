@@ -1,11 +1,14 @@
 # Věky Války ⚔️
 
-Jednoduchá **idle hra** ve stylu *Age of War* – běží přímo v prohlížeči, bez instalace
-a bez závislostí. Čistý HTML + CSS + JavaScript (Canvas).
+**Idle hra** ve stylu *Age of War* – běží přímo v prohlížeči, bez instalace.
+Herní logika je oddělená do testovatelného jádra, takže funkčnost je **doložena
+automatickými testy** (Node simulace + headless prohlížeč přes Playwright).
+
+![Ukázka hry](figs/screenshot.png)
 
 ## Jak hrát
 
-Otevři soubor `index.html` v prohlížeči (stačí na něj dvakrát kliknout) – víc není potřeba.
+Otevři `index.html` v prohlížeči (stačí dvojklik) – víc není potřeba.
 
 ### Cíl
 
@@ -13,32 +16,48 @@ Znič nepřátelskou základnu (vpravo) dřív, než nepřítel zničí tu tvoji
 
 ### Mechaniky
 
-- **Zlato** 💰 získáváš pasivně v čase a za poražené nepřátele. Utrácíš ho za najímání jednotek.
-- **Zkušenosti** ⭐ získáváš za poražené nepřátele. Slouží k postupu do dalšího věku.
-- **Věky** 🏛️ – postupně odemykáš 5 věků (Pravěk → Antika → Středověk → Moderní doba → Budoucnost),
-  každý s lepšími jednotkami.
-- **Jednotky** – každý věk nabízí tři druhy:
-  - 🛡 boj zblízka (levné, rychlé),
-  - 🏹 střelci (útok na dálku),
-  - 🐘 tank (drahý, hodně zdraví a útoku).
-- **Meteor** ☄️ – speciální útok, který zraní všechny nepřátele na bojišti (cooldown 30 s).
-- **Automatické posílání** 🤖 – zaškrtni a hra bude sama posílat vybranou jednotku (idle režim).
-  Jednotku pro automat vybereš hvězdičkou ★ na kartě.
-
-## Tipy
-
-- Z počátku stav na levné jednotky a sbírej zkušenosti na první postup.
-- Kombinuj boj zblízka (drží linii) se střelci (pálí zezadu).
-- Nech zapnuté automatické posílání a věnuj se postupu mezi věky a meteoru.
+- **Zlato** 💰 získáváš pasivně a za poražené nepřátele → najímání jednotek a stavbu věží.
+- **Zkušenosti** ⭐ získáváš za poražené nepřátele → postup do dalšího věku.
+- **Věky** 🏛️ – 5 věků (Pravěk → Antika → Středověk → Moderní doba → Budoucnost),
+  každý s lepšími jednotkami a silnějšími věžemi.
+- **Jednotky** – každý věk má tři druhy: 🛡 boj zblízka, 🏹 střelci, 🐘 tank.
+- **Obranné věže** 🗼 – postav až 4 věže na základnu; samy střílí na nejbližšího nepřítele.
+  Cena roste s počtem věží, síla podle věku v době stavby.
+- **Meteor** ☄️ – speciální útok zraňující všechny nepřátele (cooldown 30 s).
+- **Automatické posílání** 🤖 – idle režim, hra sama posílá vybranou jednotku
+  (vyber ji hvězdičkou ★ na kartě).
+- **Ukládání** 💾 – postup se průběžně ukládá do `localStorage`; tlačítkem **Restart**
+  začneš novou hru.
 
 ## Struktura projektu
 
 ```
-index.html      – stránka a HUD
-css/style.css   – vzhled
-js/game.js      – veškerá herní logika (stav, souboj, AI, vykreslování)
+index.html            – stránka a HUD
+css/style.css         – vzhled
+js/engine.js          – herní JÁDRO (čistá logika, bez DOM; běží i v Node)
+js/game.js            – prezentace (Canvas render, vstupy, ukládání)
+tests/engine.test.mjs – testy jádra (node:test)
+tests/browser.test.mjs– headless test celé hry (Playwright)
 ```
 
-## Vývoj
+Klíčový princip: **`js/engine.js` neobsahuje žádnou závislost na DOM** a používá
+deterministický seedovaný RNG. Díky tomu lze celou hru spustit a otestovat bez prohlížeče
+(`Engine.createGame({ seed })` → reprodukovatelný průběh).
 
-Žádný build krok není potřeba. Stačí upravit soubory a obnovit stránku v prohlížeči.
+## Testy
+
+```bash
+# logika jádra (žádné závislosti)
+npm test
+
+# celá hra v reálném prohlížeči (jednorázová příprava)
+npm install
+npx playwright install chromium
+npm run test:browser
+```
+
+## Tipy
+
+- Zpočátku stav na levné jednotky a sbírej zkušenosti na první postup.
+- Kombinuj boj zblízka (drží linii) se střelci (pálí zezadu) a postav pár věží na obranu.
+- Nech zapnuté automatické posílání a soustřeď se na postup věky a meteor.

@@ -74,6 +74,8 @@ body {
 .action-btn:active:not(:disabled) { transform: translateY(1px); }
 .action-btn:disabled { opacity: .4; cursor: not-allowed; }
 .action-btn.special { border-color: var(--accent); color: #cdbbff; }
+.action-btn.tower { border-color: #5dd3b0; color: #aef0dc; }
+.action-btn.reset { border-color: #6a4a4a; color: #e0a9a9; }
 
 .auto-toggle {
   display: flex;
