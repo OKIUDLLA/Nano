@@ -102,9 +102,17 @@
     if (game.over) {
       if (overlay.classList.contains("hidden")) {
         document.getElementById("overlay-title").textContent = game.won ? "Vítězství!" : "Porážka";
-        document.getElementById("overlay-text").textContent = game.won
+        const st = game.stats || { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 };
+        const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
+        const base = game.won
           ? "Zničil jsi nepřátelskou základnu. Dobrá práce, veliteli!"
           : "Tvoje základna padla. Zkus to znovu s lepší strategií.";
+        document.getElementById("overlay-text").innerHTML =
+          base +
+          `<br><br>⏱ Čas: ${mins}:${String(secs).padStart(2, "0")}` +
+          ` &nbsp; ⚔ Zabití: ${st.kills}` +
+          ` &nbsp; 🪖 Vysláno: ${st.unitsSent}` +
+          `<br>💰 Vyděláno: ${st.goldEarned} &nbsp; 🗼 Věží: ${st.towersBuilt}`;
         overlay.classList.remove("hidden");
       }
     } else {

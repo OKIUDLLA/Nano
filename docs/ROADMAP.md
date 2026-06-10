@@ -55,7 +55,7 @@ Legenda: `[ ]` = TODO, `[x]` = hotovo. Položky jsou řazené tak, aby každá b
 samostatně dodatelná a otestovatelná.
 
 ### Fáze 1 — Pocit a polish (juice)
-- [ ] **F1.1 Statistiky zápasu** v jádře (kills, zlato vyděláno, jednotky vyslané, doba hry) + zobrazení na konci. *(engine + test)*
+- [x] **F1.1 Statistiky zápasu** v jádře (kills, zlato vyděláno, jednotky vyslané, doba hry) + zobrazení na konci. *(engine + test)*
 - [ ] **F1.2 Animace útoku** jednotek (výpad/úder při zásahu) navázaná na efekty. *(render)*
 - [ ] **F1.3 Zvuky (WebAudio)** — výstřel, zásah, najmutí, evoluce, meteor, výhra/prohra; bez assetů (syntéza). Tlačítko mute. *(render/ui)*
 - [ ] **F1.4 Úvodní obrazovka + pauza** (Start/Pokračovat/Restart, ovládání). *(ui)*
@@ -97,4 +97,4 @@ samostatně dodatelná a otestovatelná.
 ---
 
 ## 3. Changelog iterací
-- _zatím prázdné — doplňuje se s každou dokončenou položkou_
+- **F1.1** Statistiky zápasu (zabití, vyděláno, vysláno, věže) + rozpis na konci hry.

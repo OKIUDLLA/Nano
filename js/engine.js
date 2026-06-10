@@ -107,6 +107,7 @@
       specialCd: 0,
       over: false,
       won: false,
+      stats: { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 },
     };
   }
 
@@ -150,6 +151,7 @@
     if (gold < t.cost) return false;
     if (side === "player") state.gold -= t.cost; else state.enemyGold -= t.cost;
     spawnUnit(state, side, t);
+    if (side === "player" && state.stats) state.stats.unitsSent++;
     return true;
   }
 
@@ -166,6 +168,7 @@
       side, slot: towerCount(state, side),
       dmg: tmpl.dmg, range: tmpl.range, interval: tmpl.interval, cd: 0,
     });
+    if (side === "player" && state.stats) state.stats.towersBuilt++;
     return true;
   }
 
@@ -335,6 +338,7 @@
       if (u.side === "enemy") {
         state.gold += u.reward;
         state.xp += u.xp;
+        if (state.stats) { state.stats.kills++; state.stats.goldEarned += u.reward; }
         addFloat(state, "+" + u.reward, u.x, "#ffce54");
       } else {
         state.enemyGold += Math.round(u.reward * 0.4);

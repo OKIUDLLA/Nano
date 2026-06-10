@@ -104,6 +104,25 @@ test("stejný seed dává shodný průběh (determinismus)", () => {
   assert.deepEqual(run(), run());
 });
 
+test("statistiky zápasu se počítají (jednotky, věže, killy, zlato)", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 100000;
+  assert.deepEqual(g.stats, { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 });
+  E.buyUnit(g, "player", 0);
+  E.buyUnit(g, "player", 1);
+  assert.equal(g.stats.unitsSent, 2);
+  E.buyTower(g, "player");
+  assert.equal(g.stats.towersBuilt, 1);
+  // nepřátelská jednotka zemře → kill + zlato
+  g.enemyGold = 1000;
+  E.buyUnit(g, "enemy", 0);
+  const enemy = g.units.find(u => u.side === "enemy");
+  enemy.hp = 0;
+  E.update(g, 0.016);
+  assert.equal(g.stats.kills, 1);
+  assert.ok(g.stats.goldEarned > 0);
+});
+
 test("seedovaná hra s autopilotem doběhne do terminálního stavu", () => {
   const g = E.createGame({ seed: 7 });
   g.auto = true;
