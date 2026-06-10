@@ -126,6 +126,8 @@
       autoUnit: 0,
       autoTimer: 0,
       specialCd: 0,
+      specialType: "meteor",
+      freezeT: 0,
       over: false,
       won: false,
       stats: { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 },
@@ -187,9 +189,41 @@
     if (side === "player") state.gold -= cost; else state.enemyGold -= cost;
     state.towers.push({
       side, slot: towerCount(state, side),
-      dmg: tmpl.dmg, range: tmpl.range, interval: tmpl.interval, cd: 0,
+      dmg: tmpl.dmg, range: tmpl.range, interval: tmpl.interval, cd: 0, level: 1,
     });
     if (side === "player" && state.stats) state.stats.towersBuilt++;
+    return true;
+  }
+
+  function towerUpgradeCost(tw, side, state) {
+    const age = side === "player" ? state.age : state.enemyAge;
+    return Math.round(TOWERS[age].cost * 0.8 * (tw.level || 1));
+  }
+
+  // Vrátí index nejlevněji vylepšitelné věže dané strany (nejnižší úroveň < 3), jinak -1
+  function nextUpgradableTower(state, side) {
+    let best = -1, bestLevel = 99;
+    for (let i = 0; i < state.towers.length; i++) {
+      const t = state.towers[i];
+      if (t.side !== side) continue;
+      const lvl = t.level || 1;
+      if (lvl < 3 && lvl < bestLevel) { bestLevel = lvl; best = i; }
+    }
+    return best;
+  }
+
+  function upgradeTower(state, side, idx) {
+    if (state.over) return false;
+    const tw = state.towers[idx];
+    if (!tw || tw.side !== side) return false;
+    if ((tw.level || 1) >= 3) return false;
+    const cost = towerUpgradeCost(tw, side, state);
+    const gold = side === "player" ? state.gold : state.enemyGold;
+    if (gold < cost) return false;
+    if (side === "player") state.gold -= cost; else state.enemyGold -= cost;
+    tw.level = (tw.level || 1) + 1;
+    tw.dmg = Math.round(tw.dmg * 1.5);
+    tw.range = Math.round(tw.range * 1.1);
     return true;
   }
 
@@ -203,11 +237,27 @@
     return true;
   }
 
+  const SPECIALS = {
+    meteor: { label: "Meteor", icon: "☄️" },
+    heal:   { label: "Léčení", icon: "➕" },
+    freeze: { label: "Zmrazení", icon: "❄️" },
+  };
+
   function special(state) {
     if (state.over || state.specialCd > 0) return false;
-    const dmg = 150 + state.age * 160;
-    for (const u of state.units) if (u.side === "enemy") u.hp -= dmg;
-    state.effects.push({ type: "meteor", ttl: 0.7 });
+    const type = SPECIALS[state.specialType] ? state.specialType : "meteor";
+    if (type === "meteor") {
+      const dmg = 150 + state.age * 160;
+      for (const u of state.units) if (u.side === "enemy") u.hp -= dmg;
+      state.effects.push({ type: "meteor", ttl: 0.7 });
+    } else if (type === "heal") {
+      const amt = 400 + state.age * 120;
+      state.playerBaseHp = Math.min(BASE_MAX_HP, state.playerBaseHp + amt);
+      state.effects.push({ type: "heal", ttl: 0.7 });
+    } else if (type === "freeze") {
+      state.freezeT = 4;
+      state.effects.push({ type: "freeze", ttl: 0.7 });
+    }
     state.specialCd = 30;
     return true;
   }
@@ -227,6 +277,11 @@
     if (state.enemyTowerTimer <= 0) {
       if (towerCount(state, "enemy") < 3 && state.enemyGold > towerCost(state, "enemy") * 1.6) {
         buyTower(state, "enemy");
+      } else {
+        const ui = nextUpgradableTower(state, "enemy");
+        if (ui >= 0 && state.enemyGold > towerUpgradeCost(state.towers[ui], "enemy", state) * 1.6) {
+          upgradeTower(state, "enemy", ui);
+        }
       }
       state.enemyTowerTimer = 12 + nextRng(state) * 8;
     }
@@ -304,7 +359,8 @@
       const ahead = (o.x - u.x) * dir;
       if (ahead > 0 && ahead < u.size + SPACING) { blocked = true; break; }
     }
-    if (!blocked) u.x += dir * u.speed * dt;
+    const slow = (u.side === "enemy" && state.freezeT > 0) ? 0.35 : 1;
+    if (!blocked) u.x += dir * u.speed * slow * dt;
   }
 
   // ---------- Krok věže ----------
@@ -333,6 +389,7 @@
     state.time += dt;
     state.gold += AGES[state.age].income * dt;
     if (state.specialCd > 0) state.specialCd -= dt;
+    if (state.freezeT > 0) state.freezeT -= dt;
 
     updateAI(state, dt);
 
@@ -374,9 +431,10 @@
 
   const Engine = {
     W, H, BASE_W, GROUND_Y, SPACING, BASE_MAX_HP, MAX_TOWERS,
-    AGES, UNITS, TOWERS, DIFFICULTIES, ROLE_INFO, COUNTER_BONUS,
+    AGES, UNITS, TOWERS, DIFFICULTIES, ROLE_INFO, COUNTER_BONUS, SPECIALS,
     createGame, update, buyUnit, buyTower, evolve, special,
     towerCount, towerCost, counterMul,
+    upgradeTower, towerUpgradeCost, nextUpgradableTower,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = Engine;

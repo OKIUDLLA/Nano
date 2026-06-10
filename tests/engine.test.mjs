@@ -84,6 +84,34 @@ test("věž stojí zlato, má limit a střílí na nepřátele", () => {
   assert.ok(g.units[0] === undefined || g.units[0].hp < hpBefore, "věž ubrala HP nepříteli");
 });
 
+test("vylepšení věže zvýší poškození a dostřel, max úroveň 3", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6;
+  assert.equal(E.buyTower(g, "player"), true);
+  const tw = g.towers[0];
+  assert.equal(tw.level, 1);
+  const dmg0 = tw.dmg, range0 = tw.range;
+  const idx = E.nextUpgradableTower(g, "player");
+  assert.equal(idx, 0);
+  assert.equal(E.upgradeTower(g, "player", 0), true);
+  assert.equal(tw.level, 2);
+  assert.ok(tw.dmg > dmg0 && tw.range > range0);
+  // do maxima a pak už ne
+  E.upgradeTower(g, "player", 0);
+  assert.equal(tw.level, 3);
+  assert.equal(E.upgradeTower(g, "player", 0), false);
+  assert.equal(E.nextUpgradableTower(g, "player"), -1);
+});
+
+test("vylepšení věže vyžaduje dost zlata", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6;
+  E.buyTower(g, "player");
+  g.gold = 0;
+  assert.equal(E.upgradeTower(g, "player", 0), false);
+  assert.equal(g.towers[0].level, 1);
+});
+
 test("meteor zraní všechny nepřátele a má cooldown", () => {
   const g = E.createGame({ seed: 1 });
   E.buyUnit(g, "enemy", 0);
@@ -93,6 +121,41 @@ test("meteor zraní všechny nepřátele a má cooldown", () => {
   g.units.forEach((u, i) => assert.ok(u.hp < hp0[i]));
   assert.ok(g.specialCd > 0);
   assert.equal(E.special(g), false, "meteor nelze hned znovu");
+});
+
+test("special: léčení obnoví HP základny (s limitem)", () => {
+  const g = E.createGame({ seed: 1 });
+  g.specialType = "heal";
+  g.playerBaseHp = 100;
+  assert.equal(E.special(g), true);
+  assert.ok(g.playerBaseHp > 100);
+  assert.ok(g.playerBaseHp <= E.BASE_MAX_HP);
+  // limit se nepřekročí
+  const g2 = E.createGame({ seed: 1 });
+  g2.specialType = "heal";
+  g2.playerBaseHp = E.BASE_MAX_HP;
+  E.special(g2);
+  assert.equal(g2.playerBaseHp, E.BASE_MAX_HP);
+});
+
+test("special: zmrazení nastaví freezeT a zpomalí nepřátele", () => {
+  const g = E.createGame({ seed: 1 });
+  g.specialType = "freeze";
+  assert.equal(E.special(g), true);
+  assert.ok(g.freezeT > 0);
+  // zmrazený nepřítel urazí kratší vzdálenost než nezmrazený
+  function dist(frozen) {
+    const s = E.createGame({ seed: 1 });
+    s.enemyGold = 1000;
+    E.buyUnit(s, "enemy", 0);
+    const u = s.units[0];
+    u.x = 500;
+    if (frozen) s.freezeT = 4;
+    const x0 = u.x;
+    for (let i = 0; i < 10; i++) E.update(s, 0.1);
+    return x0 - s.units[0].x; // nepřítel jde doleva
+  }
+  assert.ok(dist(true) < dist(false), "zmrazený postoupí méně");
 });
 
 test("stejný seed dává shodný průběh (determinismus)", () => {

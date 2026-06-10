@@ -78,11 +78,12 @@
     }
 
     const specialBtn = document.getElementById("special-btn");
+    const sp = E.SPECIALS[game.specialType] || E.SPECIALS.meteor;
     if (game.specialCd > 0) {
-      specialBtn.textContent = `Meteor (${Math.ceil(game.specialCd)}s)`;
+      specialBtn.textContent = `${sp.label} (${Math.ceil(game.specialCd)}s)`;
       specialBtn.disabled = true;
     } else {
-      specialBtn.textContent = "Meteor";
+      specialBtn.textContent = `${sp.icon} ${sp.label}`;
       specialBtn.disabled = game.over;
     }
 
@@ -95,6 +96,17 @@
       const cost = E.towerCost(game, "player");
       towerBtn.textContent = `Postavit věž (${cost} zlata)`;
       towerBtn.disabled = game.gold < cost || game.over;
+    }
+
+    const upBtn = document.getElementById("tower-up-btn");
+    const upIdx = E.nextUpgradableTower(game, "player");
+    if (upIdx < 0) {
+      upBtn.textContent = "Vylepšit věž";
+      upBtn.disabled = true;
+    } else {
+      const cost = E.towerUpgradeCost(game.towers[upIdx], "player", game);
+      upBtn.textContent = `Vylepšit věž (${cost} zlata)`;
+      upBtn.disabled = game.gold < cost || game.over;
     }
 
     const cards = document.querySelectorAll(".unit-card");
@@ -186,8 +198,16 @@
 
   // ---------- Vstupy ----------
   document.getElementById("evolve-btn").addEventListener("click", () => { if (E.evolve(game)) S.play("evolve"); });
-  document.getElementById("special-btn").addEventListener("click", () => { if (E.special(game)) S.play("meteor"); });
+  document.getElementById("special-btn").addEventListener("click", () => {
+    const type = game.specialType || "meteor";
+    if (E.special(game)) S.play(type === "heal" ? "evolve" : type === "freeze" ? "tower" : "meteor");
+  });
+  document.getElementById("special-type").addEventListener("change", (e) => { game.specialType = e.target.value; });
   document.getElementById("tower-btn").addEventListener("click", () => { if (E.buyTower(game, "player")) S.play("tower"); });
+  document.getElementById("tower-up-btn").addEventListener("click", () => {
+    const idx = E.nextUpgradableTower(game, "player");
+    if (idx >= 0 && E.upgradeTower(game, "player", idx)) S.play("tower");
+  });
 
   const muteBtn = document.getElementById("mute-btn");
   function applyMute(m) {
@@ -221,6 +241,7 @@
   else { newGame(); }
   document.getElementById("auto-check").checked = !!game.auto;
   if (game.difficulty) document.getElementById("difficulty").value = game.difficulty;
+  if (game.specialType) document.getElementById("special-type").value = game.specialType;
   applyMute(localStorage.getItem(MUTE_KEY) === "1");
   buildShop();
   lastAge = game.age;
