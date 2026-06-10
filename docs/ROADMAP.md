@@ -69,7 +69,7 @@ samostatně dodatelná a otestovatelná.
 - [ ] **F2.5 Více specialů** na výběr (meteor / léčení / zrychlení) s cooldownem. *(engine + ui)*
 
 ### Fáze 3 — Obsah a obtížnost
-- [ ] **F3.1 Volba obtížnosti** (lehká/střední/těžká → příjem a tempo AI). *(engine + test + ui)*
+- [x] **F3.1 Volba obtížnosti** (lehká/střední/těžká → příjem a tempo AI). *(engine + test + ui)*
 - [ ] **F3.2 Vlnový režim** (přibývající vlny nepřátel, mezi nimi klid na nákup). *(engine + test)*
 - [ ] **F3.3 Bossové** na konci věků (silná jednotka se schopností). *(engine + test)*
 - [ ] **F3.4 Kampaň** s několika úrovněmi a rostoucí obtížností + odemykání. *(engine + ui)*
@@ -98,3 +98,4 @@ samostatně dodatelná a otestovatelná.
 
 ## 3. Changelog iterací
 - **F1.1** Statistiky zápasu (zabití, vyděláno, vysláno, věže) + rozpis na konci hry.
+- **F3.1** Volba obtížnosti (lehká/střední/těžká) ovlivňující příjem a tempo AI.

@@ -70,6 +70,14 @@
   // Časy (s), kdy nepřítel postoupí do dalšího věku
   const ENEMY_AGE_THRESHOLDS = [42, 115, 210, 330];
 
+  // Obtížnost: incomeMul = příjem AI, spawnMul = prodleva spawnů (menší = rychleji),
+  // ageMul = škálování časů postupu věků (menší = AI sílí dřív)
+  const DIFFICULTIES = {
+    easy:   { incomeMul: 0.8, spawnMul: 1.25, ageMul: 1.25 },
+    normal: { incomeMul: 1.0, spawnMul: 1.0,  ageMul: 1.0 },
+    hard:   { incomeMul: 1.35, spawnMul: 0.8, ageMul: 0.78 },
+  };
+
   // ---------- Deterministický RNG (mulberry32), stav v `state.rngState` ----------
   function nextRng(state) {
     let a = state.rngState | 0;
@@ -86,6 +94,7 @@
     const seed = opts.seed !== undefined ? (opts.seed >>> 0) : ((Date.now() ^ (Math.random() * 1e9)) >>> 0);
     return {
       version: 3,
+      difficulty: DIFFICULTIES[opts.difficulty] ? opts.difficulty : "normal",
       rngState: seed,
       gold: 80,
       xp: 0,
@@ -193,10 +202,11 @@
 
   // ---------- AI protivníka (deterministická přes state.rngState) ----------
   function updateAI(state, dt) {
-    state.enemyGold += (AGES[state.enemyAge].income + 1) * dt;
+    const d = DIFFICULTIES[state.difficulty] || DIFFICULTIES.normal;
+    state.enemyGold += (AGES[state.enemyAge].income + 1) * d.incomeMul * dt;
 
     while (state.enemyAge < ENEMY_AGE_THRESHOLDS.length &&
-           state.time > ENEMY_AGE_THRESHOLDS[state.enemyAge]) {
+           state.time > ENEMY_AGE_THRESHOLDS[state.enemyAge] * d.ageMul) {
       state.enemyAge++;
     }
 
@@ -221,7 +231,7 @@
 
         // Šetří na tanka, když si ho skoro může dovolit
         if (state.enemyGold < tank.cost && state.enemyGold > tank.cost * 0.6 && nextRng(state) < 0.35) {
-          state.enemySpawnTimer = 0.8;
+          state.enemySpawnTimer = 0.8 * d.spawnMul;
           return;
         }
 
@@ -234,7 +244,7 @@
         }
         state.enemyGold -= t.cost;
         spawnUnit(state, "enemy", t);
-        state.enemySpawnTimer = 1.0 + nextRng(state) * 1.4;
+        state.enemySpawnTimer = (1.0 + nextRng(state) * 1.4) * d.spawnMul;
       } else {
         state.enemySpawnTimer = 0.5;
       }
@@ -352,7 +362,7 @@
 
   const Engine = {
     W, H, BASE_W, GROUND_Y, SPACING, BASE_MAX_HP, MAX_TOWERS,
-    AGES, UNITS, TOWERS,
+    AGES, UNITS, TOWERS, DIFFICULTIES,
     createGame, update, buyUnit, buyTower, evolve, special,
     towerCount, towerCost,
   };

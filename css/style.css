@@ -87,6 +87,16 @@ body {
 }
 .auto-toggle input { accent-color: var(--accent); }
 
+.difficulty-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ---------- Canvas ---------- */
 #canvas-wrap {
   position: relative;

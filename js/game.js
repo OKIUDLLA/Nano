@@ -42,7 +42,9 @@
   }
 
   function newGame() {
-    game = E.createGame({});
+    const diffEl = document.getElementById("difficulty");
+    const difficulty = diffEl ? diffEl.value : "normal";
+    game = E.createGame({ difficulty });
     exposeForTests();
     save();
   }
@@ -170,6 +172,11 @@
   document.getElementById("special-btn").addEventListener("click", () => E.special(game));
   document.getElementById("tower-btn").addEventListener("click", () => E.buyTower(game, "player"));
   document.getElementById("auto-check").addEventListener("change", (e) => { game.auto = e.target.checked; });
+  document.getElementById("difficulty").addEventListener("change", () => {
+    newGame();
+    document.getElementById("auto-check").checked = false;
+    lastAge = -1;
+  });
   document.getElementById("reset-btn").addEventListener("click", () => {
     newGame();
     document.getElementById("auto-check").checked = false;
@@ -186,6 +193,7 @@
   if (saved) { game = saved; exposeForTests(); }
   else { newGame(); }
   document.getElementById("auto-check").checked = !!game.auto;
+  if (game.difficulty) document.getElementById("difficulty").value = game.difficulty;
   buildShop();
   lastAge = game.age;
   requestAnimationFrame(frame);

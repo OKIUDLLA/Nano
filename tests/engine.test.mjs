@@ -104,6 +104,25 @@ test("stejný seed dává shodný průběh (determinismus)", () => {
   assert.deepEqual(run(), run());
 });
 
+test("obtížnost: výchozí je normal a neznámá hodnota spadne na normal", () => {
+  assert.equal(E.createGame({ seed: 1 }).difficulty, "normal");
+  assert.equal(E.createGame({ seed: 1, difficulty: "bogus" }).difficulty, "normal");
+  assert.equal(E.createGame({ seed: 1, difficulty: "hard" }).difficulty, "hard");
+});
+
+test("obtížnost: hard nechá AI postupovat věky rychleji než easy", () => {
+  function run(diff, steps) {
+    const g = E.createGame({ seed: 5, difficulty: diff });
+    g.playerBaseHp = 1e9; // ať hra neskončí a můžeme srovnat tempo
+    for (let i = 0; i < steps; i++) E.update(g, 0.1);
+    return g;
+  }
+  const easy = run("easy", 1300);
+  const hard = run("hard", 1300);
+  assert.ok(hard.enemyAge > easy.enemyAge,
+    `hard věk ${hard.enemyAge} má být > easy věk ${easy.enemyAge}`);
+});
+
 test("statistiky zápasu se počítají (jednotky, věže, killy, zlato)", () => {
   const g = E.createGame({ seed: 1 });
   g.gold = 100000;
