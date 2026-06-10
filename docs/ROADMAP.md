@@ -65,7 +65,7 @@ samostatně dodatelná a otestovatelná.
 - [x] **F2.1 Explicitní role jednotek** (tank/dps/střelec/AoE/support) + popisky v obchodě. *(engine data + ui)*
 - [x] **F2.2 Counter systém** (bonusové poškození podle role, např. kopiník vs. zvíře). *(engine + test)*
 - [ ] **F2.3 AoE útoky** (mág/dělo zasáhne více jednotek). *(engine + test)*
-- [ ] **F2.4 Vylepšení věží** (upgrade existující věže místo jen nákupu nové). *(engine + test)*
+- [x] **F2.4 Vylepšení věží** (upgrade existující věže místo jen nákupu nové). *(engine + test)*
 - [ ] **F2.5 Více specialů** na výběr (meteor / léčení / zrychlení) s cooldownem. *(engine + ui)*
 
 ### Fáze 3 — Obsah a obtížnost
@@ -102,3 +102,4 @@ samostatně dodatelná a otestovatelná.
 - **F1.2** Animace útoku (výpad, švih zbraně, záblesk u hlavně, zpětný ráz tanku).
 - **F1.3** Zvuky (WebAudio syntéza): najmutí, věž, evoluce, meteor, výstřel, zásah, výhra/prohra + mute.
 - **F2.1+F2.2** Role jednotek (pěchota/střelci/těžká) + counter trojúhelník (+50 %) a popisky v obchodě.
+- **F2.4** Vylepšování věží (úroveň 1→3: +50 % dmg, +10 % dostřel) + AI je taky vylepšuje.

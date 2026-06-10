@@ -97,6 +97,17 @@
       towerBtn.disabled = game.gold < cost || game.over;
     }
 
+    const upBtn = document.getElementById("tower-up-btn");
+    const upIdx = E.nextUpgradableTower(game, "player");
+    if (upIdx < 0) {
+      upBtn.textContent = "Vylepšit věž";
+      upBtn.disabled = true;
+    } else {
+      const cost = E.towerUpgradeCost(game.towers[upIdx], "player", game);
+      upBtn.textContent = `Vylepšit věž (${cost} zlata)`;
+      upBtn.disabled = game.gold < cost || game.over;
+    }
+
     const cards = document.querySelectorAll(".unit-card");
     cards.forEach((card, i) => {
       const t = UNITS[game.age][i];
@@ -188,6 +199,10 @@
   document.getElementById("evolve-btn").addEventListener("click", () => { if (E.evolve(game)) S.play("evolve"); });
   document.getElementById("special-btn").addEventListener("click", () => { if (E.special(game)) S.play("meteor"); });
   document.getElementById("tower-btn").addEventListener("click", () => { if (E.buyTower(game, "player")) S.play("tower"); });
+  document.getElementById("tower-up-btn").addEventListener("click", () => {
+    const idx = E.nextUpgradableTower(game, "player");
+    if (idx >= 0 && E.upgradeTower(game, "player", idx)) S.play("tower");
+  });
 
   const muteBtn = document.getElementById("mute-btn");
   function applyMute(m) {

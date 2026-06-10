@@ -187,9 +187,41 @@
     if (side === "player") state.gold -= cost; else state.enemyGold -= cost;
     state.towers.push({
       side, slot: towerCount(state, side),
-      dmg: tmpl.dmg, range: tmpl.range, interval: tmpl.interval, cd: 0,
+      dmg: tmpl.dmg, range: tmpl.range, interval: tmpl.interval, cd: 0, level: 1,
     });
     if (side === "player" && state.stats) state.stats.towersBuilt++;
+    return true;
+  }
+
+  function towerUpgradeCost(tw, side, state) {
+    const age = side === "player" ? state.age : state.enemyAge;
+    return Math.round(TOWERS[age].cost * 0.8 * (tw.level || 1));
+  }
+
+  // Vrátí index nejlevněji vylepšitelné věže dané strany (nejnižší úroveň < 3), jinak -1
+  function nextUpgradableTower(state, side) {
+    let best = -1, bestLevel = 99;
+    for (let i = 0; i < state.towers.length; i++) {
+      const t = state.towers[i];
+      if (t.side !== side) continue;
+      const lvl = t.level || 1;
+      if (lvl < 3 && lvl < bestLevel) { bestLevel = lvl; best = i; }
+    }
+    return best;
+  }
+
+  function upgradeTower(state, side, idx) {
+    if (state.over) return false;
+    const tw = state.towers[idx];
+    if (!tw || tw.side !== side) return false;
+    if ((tw.level || 1) >= 3) return false;
+    const cost = towerUpgradeCost(tw, side, state);
+    const gold = side === "player" ? state.gold : state.enemyGold;
+    if (gold < cost) return false;
+    if (side === "player") state.gold -= cost; else state.enemyGold -= cost;
+    tw.level = (tw.level || 1) + 1;
+    tw.dmg = Math.round(tw.dmg * 1.5);
+    tw.range = Math.round(tw.range * 1.1);
     return true;
   }
 
@@ -227,6 +259,11 @@
     if (state.enemyTowerTimer <= 0) {
       if (towerCount(state, "enemy") < 3 && state.enemyGold > towerCost(state, "enemy") * 1.6) {
         buyTower(state, "enemy");
+      } else {
+        const ui = nextUpgradableTower(state, "enemy");
+        if (ui >= 0 && state.enemyGold > towerUpgradeCost(state.towers[ui], "enemy", state) * 1.6) {
+          upgradeTower(state, "enemy", ui);
+        }
       }
       state.enemyTowerTimer = 12 + nextRng(state) * 8;
     }
@@ -377,6 +414,7 @@
     AGES, UNITS, TOWERS, DIFFICULTIES, ROLE_INFO, COUNTER_BONUS,
     createGame, update, buyUnit, buyTower, evolve, special,
     towerCount, towerCost, counterMul,
+    upgradeTower, towerUpgradeCost, nextUpgradableTower,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = Engine;

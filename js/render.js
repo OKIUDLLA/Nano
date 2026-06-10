@@ -289,6 +289,15 @@
     ctx.fillStyle = shade(col, 30);
     ctx.fillRect(14, -3, 4, 6);
     ctx.restore();
+    // úroveň věže (tečky)
+    const lvl = tw.level || 1;
+    for (let i = 0; i < lvl; i++) {
+      ctx.fillStyle = "#ffd86a";
+      ctx.beginPath();
+      ctx.arc(x - 6 + i * 6, y - 6, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // jiskra ve hlavni krátce po výstřelu
     const firing = game.effects.some(e => e.type === "shot" && e.tower && Math.abs(e.x1 - fireX) < 2);
     if (firing) {

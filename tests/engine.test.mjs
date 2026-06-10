@@ -84,6 +84,34 @@ test("věž stojí zlato, má limit a střílí na nepřátele", () => {
   assert.ok(g.units[0] === undefined || g.units[0].hp < hpBefore, "věž ubrala HP nepříteli");
 });
 
+test("vylepšení věže zvýší poškození a dostřel, max úroveň 3", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6;
+  assert.equal(E.buyTower(g, "player"), true);
+  const tw = g.towers[0];
+  assert.equal(tw.level, 1);
+  const dmg0 = tw.dmg, range0 = tw.range;
+  const idx = E.nextUpgradableTower(g, "player");
+  assert.equal(idx, 0);
+  assert.equal(E.upgradeTower(g, "player", 0), true);
+  assert.equal(tw.level, 2);
+  assert.ok(tw.dmg > dmg0 && tw.range > range0);
+  // do maxima a pak už ne
+  E.upgradeTower(g, "player", 0);
+  assert.equal(tw.level, 3);
+  assert.equal(E.upgradeTower(g, "player", 0), false);
+  assert.equal(E.nextUpgradableTower(g, "player"), -1);
+});
+
+test("vylepšení věže vyžaduje dost zlata", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6;
+  E.buyTower(g, "player");
+  g.gold = 0;
+  assert.equal(E.upgradeTower(g, "player", 0), false);
+  assert.equal(g.towers[0].level, 1);
+});
+
 test("meteor zraní všechny nepřátele a má cooldown", () => {
   const g = E.createGame({ seed: 1 });
   E.buyUnit(g, "enemy", 0);
