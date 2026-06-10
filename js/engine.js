@@ -126,6 +126,8 @@
       autoUnit: 0,
       autoTimer: 0,
       specialCd: 0,
+      specialType: "meteor",
+      freezeT: 0,
       over: false,
       won: false,
       stats: { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 },
@@ -235,11 +237,27 @@
     return true;
   }
 
+  const SPECIALS = {
+    meteor: { label: "Meteor", icon: "☄️" },
+    heal:   { label: "Léčení", icon: "➕" },
+    freeze: { label: "Zmrazení", icon: "❄️" },
+  };
+
   function special(state) {
     if (state.over || state.specialCd > 0) return false;
-    const dmg = 150 + state.age * 160;
-    for (const u of state.units) if (u.side === "enemy") u.hp -= dmg;
-    state.effects.push({ type: "meteor", ttl: 0.7 });
+    const type = SPECIALS[state.specialType] ? state.specialType : "meteor";
+    if (type === "meteor") {
+      const dmg = 150 + state.age * 160;
+      for (const u of state.units) if (u.side === "enemy") u.hp -= dmg;
+      state.effects.push({ type: "meteor", ttl: 0.7 });
+    } else if (type === "heal") {
+      const amt = 400 + state.age * 120;
+      state.playerBaseHp = Math.min(BASE_MAX_HP, state.playerBaseHp + amt);
+      state.effects.push({ type: "heal", ttl: 0.7 });
+    } else if (type === "freeze") {
+      state.freezeT = 4;
+      state.effects.push({ type: "freeze", ttl: 0.7 });
+    }
     state.specialCd = 30;
     return true;
   }
@@ -341,7 +359,8 @@
       const ahead = (o.x - u.x) * dir;
       if (ahead > 0 && ahead < u.size + SPACING) { blocked = true; break; }
     }
-    if (!blocked) u.x += dir * u.speed * dt;
+    const slow = (u.side === "enemy" && state.freezeT > 0) ? 0.35 : 1;
+    if (!blocked) u.x += dir * u.speed * slow * dt;
   }
 
   // ---------- Krok věže ----------
@@ -370,6 +389,7 @@
     state.time += dt;
     state.gold += AGES[state.age].income * dt;
     if (state.specialCd > 0) state.specialCd -= dt;
+    if (state.freezeT > 0) state.freezeT -= dt;
 
     updateAI(state, dt);
 
@@ -411,7 +431,7 @@
 
   const Engine = {
     W, H, BASE_W, GROUND_Y, SPACING, BASE_MAX_HP, MAX_TOWERS,
-    AGES, UNITS, TOWERS, DIFFICULTIES, ROLE_INFO, COUNTER_BONUS,
+    AGES, UNITS, TOWERS, DIFFICULTIES, ROLE_INFO, COUNTER_BONUS, SPECIALS,
     createGame, update, buyUnit, buyTower, evolve, special,
     towerCount, towerCost, counterMul,
     upgradeTower, towerUpgradeCost, nextUpgradableTower,

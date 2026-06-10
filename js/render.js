@@ -621,6 +621,17 @@
           ctx.lineTo(e.x + Math.cos(an) * r2, GROUND_Y - 20 + Math.sin(an) * r2);
           ctx.stroke();
         }
+      } else if (e.type === "heal") {
+        const a = Math.max(0, e.ttl) / 0.7;
+        ctx.fillStyle = `rgba(90,220,120,${a * 0.4})`;
+        ctx.fillRect(0, 0, W / 2, H);
+        ctx.fillStyle = `rgba(180,255,200,${a})`;
+        ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText("+", BASE_W / 2 + 4, GROUND_Y - 140);
+      } else if (e.type === "freeze") {
+        const a = Math.max(0, e.ttl) / 0.7;
+        ctx.fillStyle = `rgba(120,200,255,${a * 0.35})`;
+        ctx.fillRect(W / 2, 0, W / 2, H);
       } else if (e.type === "meteor") {
         const a = Math.max(0, e.ttl) / 0.7;
         // záblesk

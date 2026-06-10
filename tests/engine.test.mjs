@@ -123,6 +123,41 @@ test("meteor zraní všechny nepřátele a má cooldown", () => {
   assert.equal(E.special(g), false, "meteor nelze hned znovu");
 });
 
+test("special: léčení obnoví HP základny (s limitem)", () => {
+  const g = E.createGame({ seed: 1 });
+  g.specialType = "heal";
+  g.playerBaseHp = 100;
+  assert.equal(E.special(g), true);
+  assert.ok(g.playerBaseHp > 100);
+  assert.ok(g.playerBaseHp <= E.BASE_MAX_HP);
+  // limit se nepřekročí
+  const g2 = E.createGame({ seed: 1 });
+  g2.specialType = "heal";
+  g2.playerBaseHp = E.BASE_MAX_HP;
+  E.special(g2);
+  assert.equal(g2.playerBaseHp, E.BASE_MAX_HP);
+});
+
+test("special: zmrazení nastaví freezeT a zpomalí nepřátele", () => {
+  const g = E.createGame({ seed: 1 });
+  g.specialType = "freeze";
+  assert.equal(E.special(g), true);
+  assert.ok(g.freezeT > 0);
+  // zmrazený nepřítel urazí kratší vzdálenost než nezmrazený
+  function dist(frozen) {
+    const s = E.createGame({ seed: 1 });
+    s.enemyGold = 1000;
+    E.buyUnit(s, "enemy", 0);
+    const u = s.units[0];
+    u.x = 500;
+    if (frozen) s.freezeT = 4;
+    const x0 = u.x;
+    for (let i = 0; i < 10; i++) E.update(s, 0.1);
+    return x0 - s.units[0].x; // nepřítel jde doleva
+  }
+  assert.ok(dist(true) < dist(false), "zmrazený postoupí méně");
+});
+
 test("stejný seed dává shodný průběh (determinismus)", () => {
   function run() {
     const g = E.createGame({ seed: 42 });
