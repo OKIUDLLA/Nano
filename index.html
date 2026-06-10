@@ -28,6 +28,14 @@
         <label id="auto-toggle" class="auto-toggle">
           <input type="checkbox" id="auto-check" /> Automaticky posílat
         </label>
+        <label class="auto-toggle">Obtížnost
+          <select id="difficulty" class="difficulty-select">
+            <option value="easy">Lehká</option>
+            <option value="normal" selected>Střední</option>
+            <option value="hard">Těžká</option>
+          </select>
+        </label>
+        <button id="mute-btn" class="action-btn" title="Zvuk">🔊</button>
         <button id="reset-btn" class="action-btn reset">Restart</button>
       </div>
     </header>
@@ -52,6 +60,7 @@
 
   <script src="js/engine.js"></script>
   <script src="js/render.js"></script>
+  <script src="js/audio.js"></script>
   <script src="js/game.js"></script>
 </body>
 </html>

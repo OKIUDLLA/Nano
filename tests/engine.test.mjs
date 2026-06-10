@@ -104,6 +104,69 @@ test("stejný seed dává shodný průběh (determinismus)", () => {
   assert.deepEqual(run(), run());
 });
 
+test("counter systém: trojúhelník rolí dává +50 % bonus", () => {
+  assert.equal(E.counterMul("infantry", "ranged"), E.COUNTER_BONUS);
+  assert.equal(E.counterMul("ranged", "heavy"), E.COUNTER_BONUS);
+  assert.equal(E.counterMul("heavy", "infantry"), E.COUNTER_BONUS);
+  // neutrální a obrácené směry bez bonusu
+  assert.equal(E.counterMul("infantry", "heavy"), 1);
+  assert.equal(E.counterMul("ranged", "ranged"), 1);
+});
+
+test("counter systém: pěchota udělí střelci o 50 % víc poškození", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6; g.enemyGold = 1e6;
+  E.buyUnit(g, "player", 0); // Klackař = pěchota
+  E.buyUnit(g, "enemy", 1);  // Vrhač = střelci
+  const atk = g.units.find(u => u.side === "player");
+  const def = g.units.find(u => u.side === "enemy");
+  atk.x = 470; def.x = 488; // v dosahu (20 < range 24)
+  def.hp = 100000; def.role = "ranged"; def.cd = 999; atk.cd = 0;
+  const before = def.hp;
+  E.update(g, 0.001);
+  const dropped = before - def.hp;
+  assert.ok(Math.abs(dropped - atk.dmg * 1.5) < 0.01,
+    `očekáváno ${atk.dmg * 1.5}, ubráno ${dropped}`);
+});
+
+test("obtížnost: výchozí je normal a neznámá hodnota spadne na normal", () => {
+  assert.equal(E.createGame({ seed: 1 }).difficulty, "normal");
+  assert.equal(E.createGame({ seed: 1, difficulty: "bogus" }).difficulty, "normal");
+  assert.equal(E.createGame({ seed: 1, difficulty: "hard" }).difficulty, "hard");
+});
+
+test("obtížnost: hard nechá AI postupovat věky rychleji než easy", () => {
+  function run(diff, steps) {
+    const g = E.createGame({ seed: 5, difficulty: diff });
+    g.playerBaseHp = 1e9; // ať hra neskončí a můžeme srovnat tempo
+    for (let i = 0; i < steps; i++) E.update(g, 0.1);
+    return g;
+  }
+  const easy = run("easy", 1300);
+  const hard = run("hard", 1300);
+  assert.ok(hard.enemyAge > easy.enemyAge,
+    `hard věk ${hard.enemyAge} má být > easy věk ${easy.enemyAge}`);
+});
+
+test("statistiky zápasu se počítají (jednotky, věže, killy, zlato)", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 100000;
+  assert.deepEqual(g.stats, { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 });
+  E.buyUnit(g, "player", 0);
+  E.buyUnit(g, "player", 1);
+  assert.equal(g.stats.unitsSent, 2);
+  E.buyTower(g, "player");
+  assert.equal(g.stats.towersBuilt, 1);
+  // nepřátelská jednotka zemře → kill + zlato
+  g.enemyGold = 1000;
+  E.buyUnit(g, "enemy", 0);
+  const enemy = g.units.find(u => u.side === "enemy");
+  enemy.hp = 0;
+  E.update(g, 0.016);
+  assert.equal(g.stats.kills, 1);
+  assert.ok(g.stats.goldEarned > 0);
+});
+
 test("seedovaná hra s autopilotem doběhne do terminálního stavu", () => {
   const g = E.createGame({ seed: 7 });
   g.auto = true;

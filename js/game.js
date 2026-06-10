@@ -7,7 +7,10 @@
   "use strict";
 
   const E = window.Engine;
+  const S = window.Sound || { play() {}, resume() {}, setMuted() {}, isMuted() { return false; } };
   const { W, H, BASE_W, GROUND_Y, BASE_MAX_HP, AGES, UNITS } = E;
+  const MUTE_KEY = "veky-valky-muted";
+  const seenFx = new WeakSet();
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -42,7 +45,9 @@
   }
 
   function newGame() {
-    game = E.createGame({});
+    const diffEl = document.getElementById("difficulty");
+    const difficulty = diffEl ? diffEl.value : "normal";
+    game = E.createGame({ difficulty });
     exposeForTests();
     save();
   }
@@ -102,10 +107,19 @@
     if (game.over) {
       if (overlay.classList.contains("hidden")) {
         document.getElementById("overlay-title").textContent = game.won ? "Vítězství!" : "Porážka";
-        document.getElementById("overlay-text").textContent = game.won
+        const st = game.stats || { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 };
+        const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
+        const base = game.won
           ? "Zničil jsi nepřátelskou základnu. Dobrá práce, veliteli!"
           : "Tvoje základna padla. Zkus to znovu s lepší strategií.";
+        document.getElementById("overlay-text").innerHTML =
+          base +
+          `<br><br>⏱ Čas: ${mins}:${String(secs).padStart(2, "0")}` +
+          ` &nbsp; ⚔ Zabití: ${st.kills}` +
+          ` &nbsp; 🪖 Vysláno: ${st.unitsSent}` +
+          `<br>💰 Vyděláno: ${st.goldEarned} &nbsp; 🗼 Věží: ${st.towersBuilt}`;
         overlay.classList.remove("hidden");
+        S.play(game.won ? "win" : "lose");
       }
     } else {
       overlay.classList.add("hidden");
@@ -119,6 +133,7 @@
     UNITS[game.age].forEach((t, i) => {
       const card = document.createElement("div");
       card.className = "unit-card" + (i === game.autoUnit ? " auto-selected" : "");
+      const role = E.ROLE_INFO[t.role] || { icon: "", label: "", beats: "" };
       card.innerHTML = `
         <span class="star">★</span>
         <div class="name">${t.name}</div>
@@ -126,9 +141,10 @@
         <div class="stats">
           <span>❤ <b>${t.hp}</b></span>
           <span>⚔ <b>${t.dmg}</b></span>
-          <span>${t.range > 60 ? "🏹 střelec" : "🛡 boj zblízka"}</span>
-        </div>`;
-      card.addEventListener("click", () => { E.buyUnit(game, "player", i); });
+          <span>${role.icon} ${role.label}</span>
+        </div>
+        <div class="counter">silný proti: <b>${role.beats}</b></div>`;
+      card.addEventListener("click", () => { if (E.buyUnit(game, "player", i)) S.play("hire"); });
       card.querySelector(".star").addEventListener("click", (ev) => {
         ev.stopPropagation();
         game.autoUnit = i;
@@ -136,6 +152,16 @@
       });
       container.appendChild(card);
     });
+  }
+
+  // Přehraje zvuk pro nově vzniklé bojové efekty (throttling řeší Sound)
+  function playCombatSounds() {
+    for (const e of game.effects) {
+      if (seenFx.has(e)) continue;
+      seenFx.add(e);
+      if (e.type === "shot") S.play("shot");
+      else if (e.type === "hit") S.play("hit");
+    }
   }
 
   // ---------- Smyčka ----------
@@ -148,6 +174,7 @@
 
     E.update(game, dt);
     if (game.age !== lastAge) { lastAge = game.age; buildShop(); }
+    playCombatSounds();
     render(dt);
     updateHUD();
 
@@ -158,10 +185,25 @@
   }
 
   // ---------- Vstupy ----------
-  document.getElementById("evolve-btn").addEventListener("click", () => E.evolve(game));
-  document.getElementById("special-btn").addEventListener("click", () => E.special(game));
-  document.getElementById("tower-btn").addEventListener("click", () => E.buyTower(game, "player"));
+  document.getElementById("evolve-btn").addEventListener("click", () => { if (E.evolve(game)) S.play("evolve"); });
+  document.getElementById("special-btn").addEventListener("click", () => { if (E.special(game)) S.play("meteor"); });
+  document.getElementById("tower-btn").addEventListener("click", () => { if (E.buyTower(game, "player")) S.play("tower"); });
+
+  const muteBtn = document.getElementById("mute-btn");
+  function applyMute(m) {
+    S.setMuted(m);
+    muteBtn.textContent = m ? "🔇" : "🔊";
+    try { localStorage.setItem(MUTE_KEY, m ? "1" : "0"); } catch (e) {}
+  }
+  muteBtn.addEventListener("click", () => applyMute(!S.isMuted()));
+  // AudioContext smí naběhnout až po interakci uživatele
+  window.addEventListener("pointerdown", () => S.resume(), { once: true });
   document.getElementById("auto-check").addEventListener("change", (e) => { game.auto = e.target.checked; });
+  document.getElementById("difficulty").addEventListener("change", () => {
+    newGame();
+    document.getElementById("auto-check").checked = false;
+    lastAge = -1;
+  });
   document.getElementById("reset-btn").addEventListener("click", () => {
     newGame();
     document.getElementById("auto-check").checked = false;
@@ -178,6 +220,8 @@
   if (saved) { game = saved; exposeForTests(); }
   else { newGame(); }
   document.getElementById("auto-check").checked = !!game.auto;
+  if (game.difficulty) document.getElementById("difficulty").value = game.difficulty;
+  applyMute(localStorage.getItem(MUTE_KEY) === "1");
   buildShop();
   lastAge = game.age;
   requestAnimationFrame(frame);
