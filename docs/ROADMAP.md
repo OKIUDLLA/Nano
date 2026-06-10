@@ -57,7 +57,7 @@ samostatně dodatelná a otestovatelná.
 ### Fáze 1 — Pocit a polish (juice)
 - [x] **F1.1 Statistiky zápasu** v jádře (kills, zlato vyděláno, jednotky vyslané, doba hry) + zobrazení na konci. *(engine + test)*
 - [x] **F1.2 Animace útoku** jednotek (výpad/úder při zásahu) navázaná na efekty. *(render)*
-- [ ] **F1.3 Zvuky (WebAudio)** — výstřel, zásah, najmutí, evoluce, meteor, výhra/prohra; bez assetů (syntéza). Tlačítko mute. *(render/ui)*
+- [x] **F1.3 Zvuky (WebAudio)** — výstřel, zásah, najmutí, evoluce, meteor, výhra/prohra; bez assetů (syntéza). Tlačítko mute. *(render/ui)*
 - [ ] **F1.4 Úvodní obrazovka + pauza** (Start/Pokračovat/Restart, ovládání). *(ui)*
 - [ ] **F1.5 Obrazovka konce** s rozpisem statistik a tlačítkem „znovu". *(ui)*
 
@@ -100,3 +100,4 @@ samostatně dodatelná a otestovatelná.
 - **F1.1** Statistiky zápasu (zabití, vyděláno, vysláno, věže) + rozpis na konci hry.
 - **F3.1** Volba obtížnosti (lehká/střední/těžká) ovlivňující příjem a tempo AI.
 - **F1.2** Animace útoku (výpad, švih zbraně, záblesk u hlavně, zpětný ráz tanku).
+- **F1.3** Zvuky (WebAudio syntéza): najmutí, věž, evoluce, meteor, výstřel, zásah, výhra/prohra + mute.
