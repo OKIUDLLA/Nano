@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Věky Války – idle hra</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="hud">
+      <div class="hud-item">
+        <span class="hud-label">Věk</span>
+        <span id="age-name" class="hud-value">Pravěk</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Zlato</span>
+        <span id="gold" class="hud-value gold">0</span>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">Zkušenosti</span>
+        <span id="xp" class="hud-value xp">0</span>
+      </div>
+      <div class="hud-actions">
+        <button id="evolve-btn" class="action-btn">Postoupit do dalšího věku</button>
+        <button id="tower-btn" class="action-btn tower">Postavit věž</button>
+        <button id="special-btn" class="action-btn special">Meteor</button>
+        <label id="auto-toggle" class="auto-toggle">
+          <input type="checkbox" id="auto-check" /> Automaticky posílat
+        </label>
+        <button id="reset-btn" class="action-btn reset">Restart</button>
+      </div>
+    </header>
+
+    <div id="canvas-wrap">
+      <canvas id="game" width="960" height="380"></canvas>
+      <div id="overlay" class="hidden">
+        <div class="overlay-box">
+          <h1 id="overlay-title">Vítězství!</h1>
+          <p id="overlay-text"></p>
+          <button id="restart-btn" class="action-btn">Hrát znovu</button>
+        </div>
+      </div>
+    </div>
+
+    <section id="shop">
+      <h2>Najmout jednotky</h2>
+      <div id="units"></div>
+      <p class="hint">Klikni na kartu pro najmutí jednotky. Hvězdičkou ★ vybereš jednotku pro automatické posílání.</p>
+    </section>
+  </div>
+
+  <script src="js/engine.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
