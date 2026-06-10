@@ -29,31 +29,32 @@
   ];
 
   // ---------- Jednotky (3 na věk): range>60 = střelec ----------
+  // kind = vizuální typ pro vykreslení (nemá vliv na herní logiku)
   const UNITS = [
     [
-      { name: "Klackař",      cost: 25,   hp: 70,   dmg: 11,  range: 24,  speed: 36, interval: 0.8, reward: 14,  xp: 9,   size: 18, color: "#caa46a" },
-      { name: "Vrhač kamenů", cost: 55,   hp: 45,   dmg: 15,  range: 95,  speed: 30, interval: 1.1, reward: 20,  xp: 13,  size: 17, color: "#9fc46a" },
-      { name: "Mamut",        cost: 130,  hp: 240,  dmg: 20,  range: 28,  speed: 22, interval: 1.0, reward: 44,  xp: 26,  size: 28, color: "#b08968" },
+      { name: "Klackař",      kind: "club",   cost: 25,   hp: 70,   dmg: 11,  range: 24,  speed: 36, interval: 0.8, reward: 14,  xp: 9,   size: 18, color: "#caa46a" },
+      { name: "Vrhač kamenů", kind: "sling",  cost: 55,   hp: 45,   dmg: 15,  range: 95,  speed: 30, interval: 1.1, reward: 20,  xp: 13,  size: 17, color: "#9fc46a" },
+      { name: "Mamut",        kind: "beast",  cost: 130,  hp: 240,  dmg: 20,  range: 28,  speed: 22, interval: 1.0, reward: 44,  xp: 26,  size: 28, color: "#b08968" },
     ],
     [
-      { name: "Legionář",     cost: 65,   hp: 150,  dmg: 24,  range: 26,  speed: 38, interval: 0.8, reward: 28,  xp: 15,  size: 19, color: "#d6c27a" },
-      { name: "Lučištník",    cost: 110,  hp: 90,   dmg: 30,  range: 115, speed: 32, interval: 1.0, reward: 38,  xp: 21,  size: 18, color: "#86c97a" },
-      { name: "Bojový slon",  cost: 240,  hp: 460,  dmg: 44,  range: 30,  speed: 24, interval: 1.0, reward: 78,  xp: 42,  size: 30, color: "#9aa0a8" },
+      { name: "Legionář",     kind: "sword",  cost: 65,   hp: 150,  dmg: 24,  range: 26,  speed: 38, interval: 0.8, reward: 28,  xp: 15,  size: 19, color: "#d6c27a" },
+      { name: "Lučištník",    kind: "bow",    cost: 110,  hp: 90,   dmg: 30,  range: 115, speed: 32, interval: 1.0, reward: 38,  xp: 21,  size: 18, color: "#86c97a" },
+      { name: "Bojový slon",  kind: "beast",  cost: 240,  hp: 460,  dmg: 44,  range: 30,  speed: 24, interval: 1.0, reward: 78,  xp: 42,  size: 30, color: "#9aa0a8" },
     ],
     [
-      { name: "Rytíř",        cost: 150,  hp: 320,  dmg: 48,  range: 28,  speed: 40, interval: 0.8, reward: 55,  xp: 26,  size: 20, color: "#c9ced8" },
-      { name: "Kušostřelec",  cost: 210,  hp: 180,  dmg: 58,  range: 125, speed: 34, interval: 0.9, reward: 70,  xp: 34,  size: 18, color: "#7ec98e" },
-      { name: "Beranidlo",    cost: 440,  hp: 880,  dmg: 80,  range: 32,  speed: 22, interval: 1.1, reward: 140, xp: 68,  size: 32, color: "#8a6b4a" },
+      { name: "Rytíř",        kind: "sword",  cost: 150,  hp: 320,  dmg: 48,  range: 28,  speed: 40, interval: 0.8, reward: 55,  xp: 26,  size: 20, color: "#c9ced8" },
+      { name: "Kušostřelec",  kind: "bow",    cost: 210,  hp: 180,  dmg: 58,  range: 125, speed: 34, interval: 0.9, reward: 70,  xp: 34,  size: 18, color: "#7ec98e" },
+      { name: "Beranidlo",    kind: "ram",    cost: 440,  hp: 880,  dmg: 80,  range: 32,  speed: 22, interval: 1.1, reward: 140, xp: 68,  size: 32, color: "#8a6b4a" },
     ],
     [
-      { name: "Voják",        cost: 290,  hp: 560,  dmg: 85,  range: 32,  speed: 44, interval: 0.6, reward: 100, xp: 42,  size: 19, color: "#7d8a6a" },
-      { name: "Odstřelovač",  cost: 410,  hp: 320,  dmg: 135, range: 165, speed: 36, interval: 1.2, reward: 135, xp: 56,  size: 18, color: "#6abf9a" },
-      { name: "Tank",         cost: 880,  hp: 1700, dmg: 165, range: 36,  speed: 26, interval: 1.0, reward: 270, xp: 112, size: 34, color: "#6b7a5a" },
+      { name: "Voják",        kind: "soldier",cost: 290,  hp: 560,  dmg: 85,  range: 32,  speed: 44, interval: 0.6, reward: 100, xp: 42,  size: 19, color: "#7d8a6a" },
+      { name: "Odstřelovač",  kind: "rifle",  cost: 410,  hp: 320,  dmg: 135, range: 165, speed: 36, interval: 1.2, reward: 135, xp: 56,  size: 18, color: "#6abf9a" },
+      { name: "Tank",         kind: "tank",   cost: 880,  hp: 1700, dmg: 165, range: 36,  speed: 26, interval: 1.0, reward: 270, xp: 112, size: 34, color: "#6b7a5a" },
     ],
     [
-      { name: "Mech",         cost: 540,  hp: 1050, dmg: 155, range: 36,  speed: 48, interval: 0.6, reward: 185, xp: 62,  size: 22, color: "#8fa3d6" },
-      { name: "Laserista",    cost: 770,  hp: 620,  dmg: 245, range: 185, speed: 40, interval: 1.0, reward: 245, xp: 82,  size: 19, color: "#6ad6cf" },
-      { name: "Robot Titan",  cost: 1650, hp: 3300, dmg: 330, range: 40,  speed: 28, interval: 1.0, reward: 490, xp: 165, size: 38, color: "#9c8fd6" },
+      { name: "Mech",         kind: "robot",  cost: 540,  hp: 1050, dmg: 155, range: 36,  speed: 48, interval: 0.6, reward: 185, xp: 62,  size: 22, color: "#8fa3d6" },
+      { name: "Laserista",    kind: "laser",  cost: 770,  hp: 620,  dmg: 245, range: 185, speed: 40, interval: 1.0, reward: 245, xp: 82,  size: 19, color: "#6ad6cf" },
+      { name: "Robot Titan",  kind: "titan",  cost: 1650, hp: 3300, dmg: 330, range: 40,  speed: 28, interval: 1.0, reward: 490, xp: 165, size: 38, color: "#9c8fd6" },
     ],
   ];
 
@@ -84,7 +85,7 @@
     opts = opts || {};
     const seed = opts.seed !== undefined ? (opts.seed >>> 0) : ((Date.now() ^ (Math.random() * 1e9)) >>> 0);
     return {
-      version: 2,
+      version: 3,
       rngState: seed,
       gold: 80,
       xp: 0,
@@ -131,6 +132,7 @@
       reward: t.reward, xp: t.xp,
       size: t.size, color: t.color,
       ranged: t.range > 60,
+      name: t.name, kind: t.kind,
     });
   }
 

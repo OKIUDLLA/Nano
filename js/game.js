@@ -11,7 +11,17 @@
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
-  const SAVE_KEY = "veky-valky-save-v2";
+  const SAVE_KEY = "veky-valky-save-v3";
+
+  // Ostré vykreslení na hi-DPI displejích: zvětšíme backing store,
+  // ale souřadnice necháme v logických 960×380.
+  (function setupHiDPI() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+  })();
 
   let game;
   let last = performance.now();
@@ -26,7 +36,7 @@
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return null;
       const s = JSON.parse(raw);
-      if (!s || s.version !== 2 || s.over) return null;
+      if (!s || s.version !== 3 || s.over) return null;
       return s;
     } catch (e) { return null; }
   }
@@ -41,123 +51,9 @@
     window.__game = game;          // pro automatické testy
   }
 
-  // ---------- Vykreslení ----------
-  function render() {
-    const age = AGES[game.age];
-    ctx.fillStyle = age.sky;
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = age.ground;
-    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-    ctx.fillStyle = "rgba(0,0,0,.15)";
-    ctx.fillRect(0, GROUND_Y, W, 4);
-
-    drawBase("player", game.playerBaseHp, game.age);
-    drawBase("enemy", game.enemyBaseHp, game.enemyAge);
-    drawTowers();
-
-    const sorted = [...game.units].sort((a, b) => a.x - b.x);
-    for (const u of sorted) drawUnit(u);
-
-    drawEffects();
-    drawFloats();
-  }
-
-  function drawBase(side, hp, age) {
-    const x = side === "player" ? 0 : W - BASE_W;
-    const color = side === "player" ? "#33507a" : "#7a3733";
-    const top = GROUND_Y - 120;
-    ctx.fillStyle = color;
-    ctx.fillRect(x + 6, top, BASE_W - 12, 120);
-    ctx.fillStyle = side === "player" ? "#3e5f90" : "#90413c";
-    for (let i = 0; i < 4; i++) {
-      ctx.fillRect(x + 6 + i * ((BASE_W - 12) / 4), top - 10, (BASE_W - 12) / 4 - 3, 10);
-    }
-    ctx.fillStyle = side === "player" ? "#6fa8ff" : "#ff7a6f";
-    ctx.fillRect(x + BASE_W / 2 - 1, top - 34, 2, 24);
-    ctx.fillRect(x + BASE_W / 2 + 1, top - 34, 14 * (side === "player" ? 1 : -1), 10);
-
-    // číslo věku na základně
-    ctx.fillStyle = "rgba(255,255,255,.85)";
-    ctx.font = "bold 14px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(String(age + 1), x + BASE_W / 2, top + 70);
-
-    const bw = BASE_W - 14, bx = x + 7, by = top - 50;
-    ctx.fillStyle = "rgba(0,0,0,.5)";
-    ctx.fillRect(bx, by, bw, 7);
-    ctx.fillStyle = side === "player" ? "#4a90e2" : "#e2574a";
-    ctx.fillRect(bx, by, bw * Math.max(0, hp / BASE_MAX_HP), 7);
-  }
-
-  function drawTowers() {
-    for (const tw of game.towers) {
-      const x = tw.side === "player" ? BASE_W - 10 : W - BASE_W + 10;
-      const y = GROUND_Y - 150 - tw.slot * 26;
-      ctx.fillStyle = tw.side === "player" ? "#4a90e2" : "#e2574a";
-      ctx.fillRect(x - 8, y, 16, 16);
-      ctx.fillStyle = "#1b2230";
-      const dir = tw.side === "player" ? 1 : -1;
-      ctx.fillRect(x, y + 5, dir * 12, 4);
-    }
-  }
-
-  function drawUnit(u) {
-    const h = u.size * 1.7;
-    const w = u.size;
-    const x = u.x - w / 2;
-    const y = GROUND_Y - h;
-
-    ctx.fillStyle = u.color;
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = u.side === "player" ? "rgba(74,144,226,.9)" : "rgba(226,87,74,.9)";
-    ctx.fillRect(x, y, w, 4);
-    ctx.fillRect(x, GROUND_Y - 4, w, 4);
-    if (u.ranged) {
-      const dir = u.side === "player" ? 1 : -1;
-      ctx.fillStyle = "#2b2f38";
-      ctx.fillRect(u.x + dir * (w / 2), y + h * 0.3, dir * 8, 3);
-    }
-
-    const ratio = Math.max(0, u.hp / u.maxHp);
-    ctx.fillStyle = "rgba(0,0,0,.55)";
-    ctx.fillRect(x, y - 8, w, 4);
-    ctx.fillStyle = ratio > 0.5 ? "#5dd35d" : ratio > 0.25 ? "#e6c34c" : "#e2574a";
-    ctx.fillRect(x, y - 8, w * ratio, 4);
-  }
-
-  function drawEffects() {
-    for (const e of game.effects) {
-      if (e.type === "shot") {
-        ctx.strokeStyle = e.tower
-          ? "rgba(255,235,140,.9)"
-          : e.side === "player" ? "rgba(150,200,255,.8)" : "rgba(255,170,150,.8)";
-        ctx.lineWidth = e.tower ? 2.5 : 2;
-        const y = e.tower ? GROUND_Y - 150 : GROUND_Y - 22;
-        ctx.beginPath();
-        ctx.moveTo(e.x1, e.tower ? y : GROUND_Y - 22);
-        ctx.lineTo(e.x2, GROUND_Y - 22);
-        ctx.stroke();
-      } else if (e.type === "hit") {
-        ctx.fillStyle = "rgba(255,230,150," + (e.ttl / 0.15) + ")";
-        ctx.beginPath();
-        ctx.arc(e.x, GROUND_Y - 20, 6, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (e.type === "meteor") {
-        ctx.fillStyle = "rgba(255,120,40," + (e.ttl / 0.7) * 0.5 + ")";
-        ctx.fillRect(W / 2, 0, W / 2, H);
-      }
-    }
-  }
-
-  function drawFloats() {
-    ctx.font = "bold 13px sans-serif";
-    ctx.textAlign = "center";
-    for (const f of game.floats) {
-      ctx.globalAlpha = Math.min(1, f.ttl);
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, f.x, f.y);
-    }
-    ctx.globalAlpha = 1;
+  // ---------- Vykreslení (deleguje na js/render.js) ----------
+  function render(dt) {
+    window.Render.scene(ctx, game, dt, performance.now() / 1000);
   }
 
   // ---------- HUD ----------
@@ -252,7 +148,7 @@
 
     E.update(game, dt);
     if (game.age !== lastAge) { lastAge = game.age; buildShop(); }
-    render();
+    render(dt);
     updateHUD();
 
     saveAccum += dt;
