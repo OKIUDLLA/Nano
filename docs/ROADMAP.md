@@ -62,8 +62,8 @@ samostatně dodatelná a otestovatelná.
 - [ ] **F1.5 Obrazovka konce** s rozpisem statistik a tlačítkem „znovu". *(ui)*
 
 ### Fáze 2 — Hloubka soubojů
-- [ ] **F2.1 Explicitní role jednotek** (tank/dps/střelec/AoE/support) + popisky v obchodě. *(engine data + ui)*
-- [ ] **F2.2 Counter systém** (bonusové poškození podle role, např. kopiník vs. zvíře). *(engine + test)*
+- [x] **F2.1 Explicitní role jednotek** (tank/dps/střelec/AoE/support) + popisky v obchodě. *(engine data + ui)*
+- [x] **F2.2 Counter systém** (bonusové poškození podle role, např. kopiník vs. zvíře). *(engine + test)*
 - [ ] **F2.3 AoE útoky** (mág/dělo zasáhne více jednotek). *(engine + test)*
 - [ ] **F2.4 Vylepšení věží** (upgrade existující věže místo jen nákupu nové). *(engine + test)*
 - [ ] **F2.5 Více specialů** na výběr (meteor / léčení / zrychlení) s cooldownem. *(engine + ui)*
@@ -101,3 +101,4 @@ samostatně dodatelná a otestovatelná.
 - **F3.1** Volba obtížnosti (lehká/střední/těžká) ovlivňující příjem a tempo AI.
 - **F1.2** Animace útoku (výpad, švih zbraně, záblesk u hlavně, zpětný ráz tanku).
 - **F1.3** Zvuky (WebAudio syntéza): najmutí, věž, evoluce, meteor, výstřel, zásah, výhra/prohra + mute.
+- **F2.1+F2.2** Role jednotek (pěchota/střelci/těžká) + counter trojúhelník (+50 %) a popisky v obchodě.

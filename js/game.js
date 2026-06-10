@@ -133,6 +133,7 @@
     UNITS[game.age].forEach((t, i) => {
       const card = document.createElement("div");
       card.className = "unit-card" + (i === game.autoUnit ? " auto-selected" : "");
+      const role = E.ROLE_INFO[t.role] || { icon: "", label: "", beats: "" };
       card.innerHTML = `
         <span class="star">★</span>
         <div class="name">${t.name}</div>
@@ -140,8 +141,9 @@
         <div class="stats">
           <span>❤ <b>${t.hp}</b></span>
           <span>⚔ <b>${t.dmg}</b></span>
-          <span>${t.range > 60 ? "🏹 střelec" : "🛡 boj zblízka"}</span>
-        </div>`;
+          <span>${role.icon} ${role.label}</span>
+        </div>
+        <div class="counter">silný proti: <b>${role.beats}</b></div>`;
       card.addEventListener("click", () => { if (E.buyUnit(game, "player", i)) S.play("hire"); });
       card.querySelector(".star").addEventListener("click", (ev) => {
         ev.stopPropagation();

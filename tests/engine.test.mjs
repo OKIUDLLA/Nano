@@ -104,6 +104,31 @@ test("stejný seed dává shodný průběh (determinismus)", () => {
   assert.deepEqual(run(), run());
 });
 
+test("counter systém: trojúhelník rolí dává +50 % bonus", () => {
+  assert.equal(E.counterMul("infantry", "ranged"), E.COUNTER_BONUS);
+  assert.equal(E.counterMul("ranged", "heavy"), E.COUNTER_BONUS);
+  assert.equal(E.counterMul("heavy", "infantry"), E.COUNTER_BONUS);
+  // neutrální a obrácené směry bez bonusu
+  assert.equal(E.counterMul("infantry", "heavy"), 1);
+  assert.equal(E.counterMul("ranged", "ranged"), 1);
+});
+
+test("counter systém: pěchota udělí střelci o 50 % víc poškození", () => {
+  const g = E.createGame({ seed: 1 });
+  g.gold = 1e6; g.enemyGold = 1e6;
+  E.buyUnit(g, "player", 0); // Klackař = pěchota
+  E.buyUnit(g, "enemy", 1);  // Vrhač = střelci
+  const atk = g.units.find(u => u.side === "player");
+  const def = g.units.find(u => u.side === "enemy");
+  atk.x = 470; def.x = 488; // v dosahu (20 < range 24)
+  def.hp = 100000; def.role = "ranged"; def.cd = 999; atk.cd = 0;
+  const before = def.hp;
+  E.update(g, 0.001);
+  const dropped = before - def.hp;
+  assert.ok(Math.abs(dropped - atk.dmg * 1.5) < 0.01,
+    `očekáváno ${atk.dmg * 1.5}, ubráno ${dropped}`);
+});
+
 test("obtížnost: výchozí je normal a neznámá hodnota spadne na normal", () => {
   assert.equal(E.createGame({ seed: 1 }).difficulty, "normal");
   assert.equal(E.createGame({ seed: 1, difficulty: "bogus" }).difficulty, "normal");
