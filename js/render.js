@@ -302,11 +302,31 @@
   // ============================================================
   //  JEDNOTKY
   // ============================================================
-  function drawUnit(ctx, u, time) {
+  // Zjistí, zda jednotka právě útočí (cíl/základna v dosahu) a fázi úderu 0..1
+  function attackInfo(game, u) {
     const dir = u.side === "player" ? 1 : -1;
+    let nearest = null, nd = Infinity;
+    for (const o of game.units) {
+      if (o.side === u.side) continue;
+      const ahead = (o.x - u.x) * dir;
+      if (ahead < -u.size) continue;
+      if (ahead < nd) { nd = ahead; nearest = o; }
+    }
+    const baseEdge = u.side === "player" ? (W - BASE_W) : BASE_W;
+    const baseDist = (baseEdge - u.x) * dir;
+    const attacking = (nearest && nd <= u.range) || (!nearest && baseDist <= u.range);
+    // cd jede od interval k 0; hned po úderu je atk≈1, před úderem ≈0
+    const atk = attacking ? Math.max(0, Math.min(1, u.cd / (u.interval || 1))) : 0;
+    return { attacking, atk };
+  }
+
+  function drawUnit(ctx, game, u, time) {
+    const dir = u.side === "player" ? 1 : -1;
+    const { attacking, atk } = attackInfo(game, u);
     const phase = time * 9 + u.x * 0.25;
-    const walk = Math.sin(phase);
-    const bob = Math.abs(Math.cos(phase)) * 2;
+    const walk = attacking ? Math.sin(time * 3) * 0.18 : Math.sin(phase);
+    const bob = attacking ? 0 : Math.abs(Math.cos(phase)) * 2;
+    const lunge = atk * 3; // výpad vpřed v okamžiku úderu
 
     // stín
     ctx.fillStyle = "rgba(0,0,0,.28)";
@@ -317,10 +337,11 @@
     ctx.save();
     ctx.translate(u.x, GROUND_Y - bob);
     ctx.scale(dir, 1); // postavy kreslíme čelem doprava, otočíme podle strany
+    ctx.translate(lunge, 0);
 
-    if (u.kind === "beast") drawBeast(ctx, u, walk);
-    else if (u.kind === "ram" || u.kind === "tank") drawVehicle(ctx, u, walk, time);
-    else drawHumanoid(ctx, u, walk, time);
+    if (u.kind === "beast") drawBeast(ctx, u, walk, atk);
+    else if (u.kind === "ram" || u.kind === "tank") drawVehicle(ctx, u, walk, time, atk);
+    else drawHumanoid(ctx, u, walk, time, atk);
 
     ctx.restore();
 
@@ -339,7 +360,7 @@
   }
 
   // --- Humanoidní postava (meč, luk, prak, puška, laser, robot) ---
-  function drawHumanoid(ctx, u, walk, time) {
+  function drawHumanoid(ctx, u, walk, time, atk) {
     const s = u.size;
     const robot = u.kind === "robot" || u.kind === "titan";
     const body = u.color;
@@ -382,12 +403,13 @@
     }
 
     // ruka + zbraň
-    drawWeapon(ctx, u, s, torsoY, time, walk);
+    drawWeapon(ctx, u, s, torsoY, time, walk, atk || 0);
   }
 
-  function drawWeapon(ctx, u, s, torsoY, time, walk) {
+  function drawWeapon(ctx, u, s, torsoY, time, walk, atk) {
     const armY = torsoY + s * 0.18;
-    const swing = Math.sin(time * 6 + u.x) * 0.25;
+    // při útoku se zbraň rozmáchne dopředu úměrně fázi úderu
+    const swing = Math.sin(time * 6 + u.x) * 0.12 + atk * 0.9;
     ctx.strokeStyle = "#caa888";
     ctx.lineWidth = Math.max(2.5, s * 0.16);
     ctx.lineCap = "round";
@@ -440,14 +462,19 @@
         ctx.strokeStyle = "#23282f"; ctx.lineWidth = s * 0.16;
         ctx.beginPath(); ctx.moveTo(-s * 0.1, armY); ctx.lineTo(s * 0.7, armY - s * 0.08); ctx.stroke();
         ctx.fillStyle = "#3a4150"; ctx.fillRect(s * 0.1, armY - s * 0.02, s * 0.18, s * 0.12);
+        if (atk > 0.55) { // záblesk u ústí
+          ctx.fillStyle = `rgba(255,220,120,${atk})`;
+          ctx.beginPath(); ctx.arc(s * 0.74, armY - s * 0.08, s * 0.16 * atk, 0, Math.PI * 2); ctx.fill();
+        }
         break;
       }
       case "laser": {
         ctx.strokeStyle = "#39424f"; ctx.lineWidth = s * 0.18;
         ctx.beginPath(); ctx.moveTo(-s * 0.05, armY); ctx.lineTo(s * 0.6, armY - s * 0.05); ctx.stroke();
         const glow = 0.5 + 0.5 * Math.sin(time * 10 + u.x);
+        const r = s * 0.12 * (1 + atk);
         ctx.fillStyle = `rgba(110,214,207,${0.5 + glow * 0.5})`;
-        ctx.beginPath(); ctx.arc(s * 0.62, armY - s * 0.05, s * 0.12, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(s * 0.62, armY - s * 0.05, r, 0, Math.PI * 2); ctx.fill();
         break;
       }
       case "robot":
@@ -462,7 +489,7 @@
   }
 
   // --- Zvíře (mamut / slon) ---
-  function drawBeast(ctx, u, walk) {
+  function drawBeast(ctx, u, walk, atk) {
     const s = u.size;
     const body = u.color, dk = shade(body, -40), lt = shade(body, 24);
     // nohy
@@ -500,10 +527,11 @@
   }
 
   // --- Vozidlo (beranidlo / tank) ---
-  function drawVehicle(ctx, u, walk, time) {
+  function drawVehicle(ctx, u, walk, time, atk) {
     const s = u.size;
     const body = u.color, dk = shade(body, -40), lt = shade(body, 22);
     const isTank = u.kind === "tank";
+    atk = atk || 0;
 
     // pásy / kola
     ctx.fillStyle = "#1f242c";
@@ -521,11 +549,16 @@
     roundRect(ctx, -s * 0.6, -s * 0.9, s * 1.2, s * 0.6, s * 0.1); ctx.fill();
 
     if (isTank) {
-      // věž + hlaveň
+      // věž + hlaveň (se zpětným rázem při výstřelu)
       ctx.fillStyle = shade(body, -10);
       roundRect(ctx, -s * 0.3, -s * 1.15, s * 0.6, s * 0.34, s * 0.1); ctx.fill();
+      const recoil = atk * s * 0.18;
       ctx.fillStyle = "#2b313c";
-      ctx.fillRect(s * 0.2, -s * 1.02, s * 0.7, s * 0.12);
+      ctx.fillRect(s * 0.2 - recoil, -s * 1.02, s * 0.7, s * 0.12);
+      if (atk > 0.55) {
+        ctx.fillStyle = `rgba(255,210,110,${atk})`;
+        ctx.beginPath(); ctx.arc(s * 0.92, -s * 0.96, s * 0.18 * atk, 0, Math.PI * 2); ctx.fill();
+      }
     } else {
       // beranidlo – kláda s kovovou hlavou
       ctx.fillStyle = "#6a4a2c";
@@ -698,7 +731,7 @@
     for (const tw of game.towers) drawTower(ctx, game, tw, time);
 
     const sorted = [...game.units].sort((a, b) => a.x - b.x);
-    for (const u of sorted) drawUnit(ctx, u, time);
+    for (const u of sorted) drawUnit(ctx, game, u, time);
 
     drawEffects(ctx, game);
     updateParticles(game, dt);
