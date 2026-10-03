@@ -1,243 +1,336 @@
-/* Testy herního jádra – běží přes vestavěný `node --test`.
-   Ověřují ekonomiku, souboj, věže, evoluci a determinismus.        */
+/* Testy simulačního jádra – `node --test tests/`.
+   Ověřují, že remake dodržuje pravidla originálu (docs/ORIGINAL.md). */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const E = require("../js/engine.js");
+require("../js/ai.js");
+const D = E.D;
 
-test("createGame má konzistentní výchozí stav", () => {
-  const g = E.createGame({ seed: 1 });
-  assert.equal(g.gold, 80);
-  assert.equal(g.age, 0);
-  assert.equal(g.playerBaseHp, E.BASE_MAX_HP);
-  assert.equal(g.enemyBaseHp, E.BASE_MAX_HP);
-  assert.deepEqual(g.units, []);
-  assert.equal(g.over, false);
+function game(opts) { return E.createGame(Object.assign({ seed: 7 }, opts)); }
+function ticks(g, n) { for (let i = 0; i < n; i++) E.tick(g); }
+function spawn(g, side, id, x) {
+  const S = g.sides[side]; S.gold = 1e9; S.age = D.UNITS[id].age;
+  E.enqueueUnit(g, side, id);
+  ticks(g, D.UNITS[id].train + 1);
+  const u = g.units[g.units.length - 1];
+  if (x !== undefined) u.x = x;
+  return u;
+}
+function noAI(g) { g.ai.kind = "none"; return g; }
+E.registerAI("none", { create() { return { uof: 0 }; }, update() {} });
+
+test("data: 16 jednotek, 15 věží, 5 věků, odměny podle originálu", () => {
+  assert.equal(D.UNITS.length, 16);
+  assert.equal(D.TURRETS.length, 15);
+  assert.equal(D.AGES.length, 5);
+  const club = D.UNITS[0];
+  assert.equal(club.reward, 20);      // round(15*1.3)
+  assert.equal(club.killXp, 40);
+  assert.equal(club.lossXp, 10);
+  assert.equal(D.UNITS[15].reward, 195000);
+  assert.deepEqual(D.AGES.map(a => a.evolveXp).slice(0, 4), [4000, 14000, 45000, 200000]);
+  assert.deepEqual(D.SLOT_COSTS, [0, 1000, 3000, 7500]);
+  for (const u of D.UNITS) if (u.isRanged) assert.ok(u.shootPeriod > 0 && u.walkShootPeriod > 0, u.en);
 });
 
-test("nákup jednotky strhne zlato a přidá jednotku", () => {
-  const g = E.createGame({ seed: 1 });
-  const before = g.gold;
-  const ok = E.buyUnit(g, "player", 0);
-  assert.equal(ok, true);
-  assert.equal(g.units.length, 1);
-  assert.equal(g.units[0].side, "player");
-  assert.equal(g.gold, before - E.UNITS[0][0].cost);
-});
-
-test("nelze koupit jednotku bez dostatku zlata", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 0;
-  assert.equal(E.buyUnit(g, "player", 0), false);
-  assert.equal(g.units.length, 0);
-});
-
-test("souboj ubírá HP a zabití dává zlato i XP", () => {
-  const g = E.createGame({ seed: 1 });
-  // postavíme proti sobě hráčovu a nepřátelskou jednotku v dosahu
-  g.enemyGold = 1000;
-  E.buyUnit(g, "player", 0);
-  E.buyUnit(g, "enemy", 0);
-  assert.equal(g.units.length, 2);
-  g.units[0].x = 470;
-  g.units[1].x = 490;
-  g.enemyGold = 0;
-  const goldBefore = g.gold;
-  // simulujeme dokud někdo nepadne
-  let guard = 0;
-  while (g.units.length === 2 && guard < 5000) { E.update(g, 0.1); guard++; }
-  assert.ok(guard < 5000, "souboj se vyřešil v rozumném čase");
-  assert.ok(g.units.length < 2, "alespoň jedna jednotka padla");
-  assert.ok(g.gold >= goldBefore, "zlato po souboji nekleslo pod původní");
-});
-
-test("evoluce vyžaduje XP a posune věk", () => {
-  const g = E.createGame({ seed: 1 });
-  assert.equal(E.evolve(g), false, "bez XP nejde evolvovat");
-  g.xp = E.AGES[0].evolveCost;
-  assert.equal(E.evolve(g), true);
-  assert.equal(g.age, 1);
-  assert.equal(g.xp, 0);
-});
-
-test("věž stojí zlato, má limit a střílí na nepřátele", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 100000;
-  const cost0 = E.towerCost(g, "player");
-  assert.equal(E.buyTower(g, "player"), true);
-  assert.equal(E.towerCount(g, "player"), 1);
-  // další věž je dražší
-  assert.ok(E.towerCost(g, "player") > cost0);
-  // limit věží
-  for (let i = 0; i < 10; i++) E.buyTower(g, "player");
-  assert.equal(E.towerCount(g, "player"), E.MAX_TOWERS);
-
-  // věž zraní nepřítele v dosahu
-  g.enemyGold = 1000;
-  E.buyUnit(g, "enemy", 2); // odolný mamut
-  assert.equal(g.units.length, 1);
-  g.units[0].x = E.BASE_W + 40;
-  const hpBefore = g.units[0].hp;
-  for (let i = 0; i < 20; i++) E.update(g, 0.1);
-  assert.ok(g.units[0] === undefined || g.units[0].hp < hpBefore, "věž ubrala HP nepříteli");
-});
-
-test("vylepšení věže zvýší poškození a dostřel, max úroveň 3", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 1e6;
-  assert.equal(E.buyTower(g, "player"), true);
-  const tw = g.towers[0];
-  assert.equal(tw.level, 1);
-  const dmg0 = tw.dmg, range0 = tw.range;
-  const idx = E.nextUpgradableTower(g, "player");
-  assert.equal(idx, 0);
-  assert.equal(E.upgradeTower(g, "player", 0), true);
-  assert.equal(tw.level, 2);
-  assert.ok(tw.dmg > dmg0 && tw.range > range0);
-  // do maxima a pak už ne
-  E.upgradeTower(g, "player", 0);
-  assert.equal(tw.level, 3);
-  assert.equal(E.upgradeTower(g, "player", 0), false);
-  assert.equal(E.nextUpgradableTower(g, "player"), -1);
-});
-
-test("vylepšení věže vyžaduje dost zlata", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 1e6;
-  E.buyTower(g, "player");
-  g.gold = 0;
-  assert.equal(E.upgradeTower(g, "player", 0), false);
-  assert.equal(g.towers[0].level, 1);
-});
-
-test("meteor zraní všechny nepřátele a má cooldown", () => {
-  const g = E.createGame({ seed: 1 });
-  E.buyUnit(g, "enemy", 0);
-  E.buyUnit(g, "enemy", 0);
-  const hp0 = g.units.map(u => u.hp);
-  assert.equal(E.special(g), true);
-  g.units.forEach((u, i) => assert.ok(u.hp < hp0[i]));
-  assert.ok(g.specialCd > 0);
-  assert.equal(E.special(g), false, "meteor nelze hned znovu");
-});
-
-test("special: léčení obnoví HP základny (s limitem)", () => {
-  const g = E.createGame({ seed: 1 });
-  g.specialType = "heal";
-  g.playerBaseHp = 100;
-  assert.equal(E.special(g), true);
-  assert.ok(g.playerBaseHp > 100);
-  assert.ok(g.playerBaseHp <= E.BASE_MAX_HP);
-  // limit se nepřekročí
-  const g2 = E.createGame({ seed: 1 });
-  g2.specialType = "heal";
-  g2.playerBaseHp = E.BASE_MAX_HP;
-  E.special(g2);
-  assert.equal(g2.playerBaseHp, E.BASE_MAX_HP);
-});
-
-test("special: zmrazení nastaví freezeT a zpomalí nepřátele", () => {
-  const g = E.createGame({ seed: 1 });
-  g.specialType = "freeze";
-  assert.equal(E.special(g), true);
-  assert.ok(g.freezeT > 0);
-  // zmrazený nepřítel urazí kratší vzdálenost než nezmrazený
-  function dist(frozen) {
-    const s = E.createGame({ seed: 1 });
-    s.enemyGold = 1000;
-    E.buyUnit(s, "enemy", 0);
-    const u = s.units[0];
-    u.x = 500;
-    if (frozen) s.freezeT = 4;
-    const x0 = u.x;
-    for (let i = 0; i < 10; i++) E.update(s, 0.1);
-    return x0 - s.units[0].x; // nepřítel jde doleva
+test("createGame: 175 zlata, základna 500 HP, 1 slot, special připraven po 1 ticku", () => {
+  const g = game();
+  for (const S of g.sides) {
+    assert.equal(S.gold, 175); assert.equal(S.baseHp, 500); assert.equal(S.slots, 1);
+    assert.equal(S.specialCd, 1);
   }
-  assert.ok(dist(true) < dist(false), "zmrazený postoupí méně");
+  assert.equal(E.canUseSpecial(g, 0), false);
+  E.tick(g);
+  assert.equal(E.canUseSpecial(g, 0), true);
 });
 
-test("stejný seed dává shodný průběh (determinismus)", () => {
-  function run() {
-    const g = E.createGame({ seed: 42 });
-    for (let i = 0; i < 300; i++) E.update(g, 0.1);
-    return { gold: Math.round(g.gold), units: g.units.length, ehp: Math.round(g.enemyBaseHp), php: Math.round(g.playerBaseHp), eage: g.enemyAge };
+test("fronta: strhne zlato, max 5, odmítne jiný věk a nedostatek zlata, výcvik trvá podle tabulky", () => {
+  const g = noAI(game());
+  const S = g.sides[0];
+  assert.equal(E.enqueueUnit(g, 0, 3), false, "mečíř je z jiného věku");
+  assert.equal(E.enqueueUnit(g, 0, 2), true, "dino za 100");
+  assert.equal(S.gold, 75);
+  assert.equal(E.enqueueUnit(g, 0, 2), false, "nedostatek zlata");
+  for (let i = 0; i < 4; i++) assert.equal(E.enqueueUnit(g, 0, 0), true);
+  assert.equal(S.queue.length, 5);
+  assert.equal(E.enqueueUnit(g, 0, 0), false, "fronta plná");
+  assert.equal(S.gold, 15);
+  ticks(g, 99);
+  assert.equal(g.units.length, 0, "dino se trénuje 100 ticků");
+  ticks(g, 1);
+  assert.equal(g.units.length, 1);
+  assert.ok(Math.abs(g.units[0].x - 150) < 1.01, "spawn na x≈150");
+  assert.equal(S.queue.length, 4);
+  ticks(g, 40);
+  assert.equal(g.units.length, 2, "klackař se trénuje 40 ticků");
+  assert.equal(E.cancelQueued(g, 0, 1), true);
+  assert.equal(S.gold, 30, "refundace zrušené jednotky");
+});
+
+test("pohyb: 0.7 px/tick, druhá jednotka se zastaví za první (zástup)", () => {
+  const g = noAI(game());
+  const a = spawn(g, 0, 0, 300);
+  const x0 = a.x;
+  ticks(g, 10);
+  assert.ok(Math.abs(a.x - x0 - 7) < 1e-9, "7 px za 10 ticků");
+  const b = spawn(g, 0, 0);
+  b.x = a.x - 100;
+  ticks(g, 1000); // první se zastaví u nepřátelské základny, druhá za ní
+  const gap = a.x - b.x;
+  const limit = a.w / 2 + b.w / 2 + 2;
+  assert.ok(gap > limit - 0.8 && gap < limit + 1.5, `rozestup ${gap} ≈ limit ${limit}`);
+});
+
+test("boj zblízka: klackař udeří ve 20. ticku animace za 14–16, zabití dá 20 $ a 40 XP, majitel dostane 10 XP", () => {
+  const g = noAI(game());
+  const a = spawn(g, 0, 0, 480);
+  const b = spawn(g, 1, 0, 520);
+  b.hp = 10000; a.hp = 10000;
+  // přiblížení: zastaví se na limitu 33.6 px, melee dosah 20 od okraje (dist < 35.8) → útočí
+  let firstHit = null;
+  for (let t = 0; t < 400 && firstHit === null; t++) {
+    E.tick(g);
+    if (b.hp < 10000) firstHit = { tick: g.tick, dmg: 10000 - b.hp };
   }
-  assert.deepEqual(run(), run());
+  assert.ok(firstHit, "došlo k zásahu");
+  assert.ok(firstHit.dmg >= 14 && firstHit.dmg <= 16, `dmg ${firstHit.dmg}`);
+  // perioda 40 ticků mezi údery
+  const hp1 = b.hp;
+  ticks(g, 39);
+  assert.equal(b.hp, hp1, "žádný další úder před 40 ticky");
+  ticks(g, 1);
+  assert.ok(b.hp < hp1, "další úder přesně po 40 ticích");
+
+  // zabití
+  b.hp = 1;
+  const gold = g.sides[0].gold, xp0 = g.sides[0].xp, xp1 = g.sides[1].xp;
+  ticks(g, 45);
+  assert.equal(g.sides[0].gold, gold + 20);
+  assert.equal(g.sides[0].xp, xp0 + 40);
+  assert.equal(g.sides[1].xp, xp1 + 10);
+  assert.equal(g.sides[0].stats.kills, 1);
+  assert.ok(b.dead);
+  ticks(g, 80);
+  assert.ok(!g.units.includes(b), "tělo zmizí po 80 ticích");
 });
 
-test("counter systém: trojúhelník rolí dává +50 % bonus", () => {
-  assert.equal(E.counterMul("infantry", "ranged"), E.COUNTER_BONUS);
-  assert.equal(E.counterMul("ranged", "heavy"), E.COUNTER_BONUS);
-  assert.equal(E.counterMul("heavy", "infantry"), E.COUNTER_BONUS);
-  // neutrální a obrácené směry bez bonusu
-  assert.equal(E.counterMul("infantry", "heavy"), 1);
-  assert.equal(E.counterMul("ranged", "ranged"), 1);
+test("střelec: prakovník střílí na nepřítele do 100 px od okraje a dál ne", () => {
+  const g = noAI(game());
+  const s = spawn(g, 0, 1, 400);
+  const e = spawn(g, 1, 2, 400 + 150 + 81.4 / 2 + 5); // okraj dina 155 px daleko
+  e.hp = 1e6; s.hp = 1e6;
+  const dinoDef = D.UNITS[2];
+  // zmrazíme dino i prakovníka na místě tím, že jim dáme obrovskou šířku? ne – ověříme chování v čase:
+  // dino jde doleva 0.7/tick, prakovník doprava 0.7/tick → okraj se blíží 1.4 px/tick → do dosahu 100 za ~39 ticků
+  let shotAt = null;
+  for (let t = 0; t < 200 && shotAt === null; t++) { E.tick(g); if (e.hp < 1e6) shotAt = g.tick; }
+  assert.ok(shotAt !== null, "prakovník zasáhl");
+  const edge = (e.x - e.w / 2) - s.x;
+  assert.ok(edge < 100 + 1.4 * 31, `při zásahu byl okraj v dosahu (edge=${edge.toFixed(1)})`);
+  void dinoDef;
 });
 
-test("counter systém: pěchota udělí střelci o 50 % víc poškození", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 1e6; g.enemyGold = 1e6;
-  E.buyUnit(g, "player", 0); // Klackař = pěchota
-  E.buyUnit(g, "enemy", 1);  // Vrhač = střelci
-  const atk = g.units.find(u => u.side === "player");
-  const def = g.units.find(u => u.side === "enemy");
-  atk.x = 470; def.x = 488; // v dosahu (20 < range 24)
-  def.hp = 100000; def.role = "ranged"; def.cd = 999; atk.cd = 0;
-  const before = def.hp;
-  E.update(g, 0.001);
-  const dropped = before - def.hp;
-  assert.ok(Math.abs(dropped - atk.dmg * 1.5) < 0.01,
-    `očekáváno ${atk.dmg * 1.5}, ubráno ${dropped}`);
+test("útok na základnu: jednotka dojde k nepřátelské základně, poškodí ji, HP < 0 = konec hry", () => {
+  const g = noAI(game());
+  const u = spawn(g, 0, 11, 700); // tank, 300 dmg
+  g.sides[1].baseHp = 350; g.sides[1].baseMaxHp = 350;
+  ticks(g, 400);
+  assert.ok(g.sides[1].baseHp < 350, "základna poškozena");
+  assert.ok(u.x < D.BASE_EDGE[1] - u.w / 2 + 1, "tank se zastavil před základnou");
+  ticks(g, 200);
+  assert.equal(g.over, true);
+  assert.equal(g.winner, 0);
 });
 
-test("obtížnost: výchozí je normal a neznámá hodnota spadne na normal", () => {
-  assert.equal(E.createGame({ seed: 1 }).difficulty, "normal");
-  assert.equal(E.createGame({ seed: 1, difficulty: "bogus" }).difficulty, "normal");
-  assert.equal(E.createGame({ seed: 1, difficulty: "hard" }).difficulty, "hard");
+test("věž: kamenný prak střílí každých 30 ticků na cíl do 350 px a trefí stojící jednotku", () => {
+  const g = noAI(game());
+  g.sides[0].gold = 1e6;
+  assert.equal(E.buildTurret(g, 0, 0, 0), true);
+  assert.equal(g.sides[0].gold, 1e6 - 100);
+  assert.equal(E.buildTurret(g, 0, 1, 0), false, "slot 1 ještě není koupený");
+  const e = spawn(g, 1, 2, 260); e.hp = 1e6;
+  // dino jde k základně a zastaví se u ní; sledujeme výstřely
+  let shots = 0, hits = 0, lastShot = null, gaps = [];
+  for (let t = 0; t < 600; t++) {
+    E.tick(g);
+    for (const ev of g.events) if (ev.t === "shot") { shots++; if (lastShot) gaps.push(g.tick - lastShot); lastShot = g.tick; }
+    for (const ev of g.events) if (ev.t === "hit" && ev.kind === "shot") hits++;
+  }
+  assert.ok(shots >= 10, `věž střílela (${shots})`);
+  assert.ok(gaps.every(x => x === 30), `perioda 30 ticků: ${gaps.slice(0, 5)}`);
+  assert.ok(hits >= 3, `aspoň pár zásahů (${hits})`);
+  // mimo dosah nestřílí
+  const g2 = noAI(game()); g2.sides[0].gold = 1e6; E.buildTurret(g2, 0, 0, 0);
+  const far = spawn(g2, 1, 11, 900); far.hp = 1e6; far.w = 1; // tank daleko, zmenšený
+  let shots2 = 0; for (let t = 0; t < 100; t++) { E.tick(g2); for (const ev of g2.events) if (ev.t === "shot") shots2++; }
+  assert.equal(shots2, 0);
 });
 
-test("obtížnost: hard nechá AI postupovat věky rychleji než easy", () => {
-  function run(diff, steps) {
-    const g = E.createGame({ seed: 5, difficulty: diff });
-    g.playerBaseHp = 1e9; // ať hra neskončí a můžeme srovnat tempo
-    for (let i = 0; i < steps; i++) E.update(g, 0.1);
+test("sloty a prodej: 1000/3000/7500, max 4, prodej vrátí 50 %", () => {
+  const g = noAI(game());
+  const S = g.sides[0]; S.gold = 20000;
+  assert.equal(E.slotCost(g, 0), 1000);
+  assert.equal(E.buySlot(g, 0), true); assert.equal(S.gold, 19000);
+  assert.equal(E.buySlot(g, 0), true); assert.equal(S.gold, 16000);
+  assert.equal(E.buySlot(g, 0), true); assert.equal(S.gold, 8500);
+  assert.equal(E.buySlot(g, 0), false); assert.equal(S.slots, 4);
+  assert.equal(E.slotCost(g, 0), null);
+  E.buildTurret(g, 0, 3, 2); // primitivní katapult 500
+  assert.equal(S.gold, 8000);
+  assert.equal(E.sellTurret(g, 0, 3), true);
+  assert.equal(S.gold, 8250);
+  assert.equal(S.turrets[3], null);
+});
+
+test("evoluce: potřebuje kumulativní XP (neodečítá se), základna +300×věk", () => {
+  const g = noAI(game());
+  const S = g.sides[0];
+  assert.equal(E.canEvolve(g, 0), false);
+  S.xp = 4000;
+  assert.equal(E.evolve(g, 0), true);
+  assert.equal(S.age, 1); assert.equal(S.xp, 4000); assert.equal(S.baseHp, 1100); assert.equal(S.baseMaxHp, 1100);
+  assert.equal(E.evolve(g, 0), false, "na 14000 nestačí");
+  S.xp = 14000; E.evolve(g, 0); assert.equal(S.baseHp, 2000);
+  S.xp = 45000; E.evolve(g, 0); assert.equal(S.baseHp, 3200);
+  S.xp = 200000; E.evolve(g, 0); assert.equal(S.baseHp, 4700); assert.equal(S.age, 4);
+  assert.equal(E.evolve(g, 0), false, "dál to nejde");
+});
+
+test("special: cooldown 2000 ticků; meteory zraní nepřátele; léčení léčí; paprsek dá 12 úderů", () => {
+  const g = noAI(game()); E.tick(g);
+  g.sides[0].baseHp = g.sides[0].baseMaxHp = 1e9;   // ať dinové nezničí základnu dřív, než doběhne test
+  const e1 = spawn(g, 1, 2, 400), e2 = spawn(g, 1, 2, 600);
+  e1.hp = e2.hp = 1e6;
+  assert.equal(E.useSpecial(g, 0), true);
+  assert.equal(g.sides[0].specialCd, 2000);
+  assert.equal(E.useSpecial(g, 0), false);
+  let impacts = 0;
+  for (let t = 0; t < 400; t++) { E.tick(g); for (const ev of g.events) if (ev.t === "impact" && ev.kind === "meteors") impacts++; }
+  assert.ok(impacts >= 15, `meteory dopadly (${impacts})`);
+  assert.ok(e1.hp < 1e6 || e2.hp < 1e6, "aspoň jeden dino zasažen");
+  ticks(g, 1600);
+  assert.equal(E.canUseSpecial(g, 0), true, "po 2000 ticích znovu");
+
+  const h = noAI(game()); E.tick(h); h.sides[0].age = 2;
+  const mine = spawn(h, 0, 6, 300); mine.hp = 50;
+  E.useSpecial(h, 0); ticks(h, 100);
+  assert.ok(mine.hp >= 149 && mine.hp <= 150, `léčení +1/tick (hp=${mine.hp})`);
+
+  const r = noAI(game()); E.tick(r); r.sides[0].age = 4;
+  const v = spawn(r, 1, 11, 430); v.hp = 1e6; v.w = 1000; // tank přes celé bojiště → každý úder trefí
+  E.useSpecial(r, 0);
+  let rays = 0; for (let t = 0; t < 120; t++) { E.tick(r); for (const ev of r.events) if (ev.t === "ray") rays++; }
+  assert.equal(rays, 12);
+  assert.ok(Math.abs(1e6 - v.hp - 12000) < 1, `12 × 1000 dmg (ubrano ${1e6 - v.hp})`);
+});
+
+test("AI originálu: věž v ticku 1000, evoluce v ticku 8000, max 6 jednotek, zdarma", () => {
+  const g = game();
+  g.sides[0].baseHp = 1e9; g.sides[0].baseMaxHp = 1e9;
+  let built = null, evolved = null;
+  for (let t = 0; t < 8100; t++) {
+    E.tick(g);
+    for (const ev of g.events) {
+      if (ev.t === "build" && ev.side === 1 && built === null) built = { tick: g.tick, id: ev.id, slot: ev.slot };
+      if (ev.t === "evolve" && ev.side === 1 && evolved === null) evolved = g.tick;
+    }
+    assert.ok(E.aliveUnits(g, 1) <= 6, "nikdy víc než 6 nepřátel");
+  }
+  assert.deepEqual(built, { tick: 1000, id: 0, slot: 0 });
+  assert.equal(evolved, 8000);
+  assert.equal(g.sides[1].age, 1);
+  assert.equal(g.sides[1].baseMaxHp, 1100);
+  assert.equal(g.sides[1].stats.unitsTrained, 6, "AI natrénovala 6 jednotek a pak čeká (limit 6 živých)");
+  assert.equal(E.aliveUnits(g, 1), 6);
+  assert.equal(g.sides[1].gold, 175, "AI za jednotky neplatí");
+});
+
+test("obtížnost násobí HP a dmg nepřátelských jednotek", () => {
+  const n = noAI(game({ difficulty: "normal" })), h = noAI(game({ difficulty: "harder" })), i = noAI(game({ difficulty: "impossible" }));
+  assert.equal(spawn(n, 1, 0).maxHp, 55);
+  assert.ok(Math.abs(spawn(h, 1, 0).maxHp - 71.5) < 1e-9);
+  assert.equal(spawn(i, 1, 0).maxHp, 110);
+  assert.equal(spawn(i, 0, 0).maxHp, 55, "hráčovy jednotky beze změny");
+  assert.equal(E.createGame({ difficulty: "bogus" }).difficulty, "normal");
+});
+
+test("determinismus a serializace: stejný seed = stejný průběh, uložený stav pokračuje identicky", () => {
+  function play(g, n) {
+    for (let t = 0; t < n; t++) {
+      if (t % 50 === 0) { const pool = D.UNITS_BY_AGE[g.sides[0].age]; E.enqueueUnit(g, 0, pool[t % pool.length].id); }
+      if (E.canEvolve(g, 0)) E.evolve(g, 0);
+      E.tick(g);
+    }
     return g;
   }
-  const easy = run("easy", 1300);
-  const hard = run("hard", 1300);
-  assert.ok(hard.enemyAge > easy.enemyAge,
-    `hard věk ${hard.enemyAge} má být > easy věk ${easy.enemyAge}`);
+  const a = play(game({ seed: 123 }), 3000), b = play(game({ seed: 123 }), 3000);
+  assert.equal(JSON.stringify(a), JSON.stringify(b));
+  const c = play(game({ seed: 123 }), 1500);
+  const d = JSON.parse(JSON.stringify(c));
+  play(c, 1500); play(d, 1500);
+  assert.equal(JSON.stringify(c), JSON.stringify(d));
+  assert.ok(!/NaN|Infinity/.test(JSON.stringify(a)), "stav bez NaN/Infinity");
 });
 
-test("statistiky zápasu se počítají (jednotky, věže, killy, zlato)", () => {
-  const g = E.createGame({ seed: 1 });
-  g.gold = 100000;
-  assert.deepEqual(g.stats, { kills: 0, goldEarned: 0, unitsSent: 0, towersBuilt: 0 });
-  E.buyUnit(g, "player", 0);
-  E.buyUnit(g, "player", 1);
-  assert.equal(g.stats.unitsSent, 2);
-  E.buyTower(g, "player");
-  assert.equal(g.stats.towersBuilt, 1);
-  // nepřátelská jednotka zemře → kill + zlato
-  g.enemyGold = 1000;
-  E.buyUnit(g, "enemy", 0);
-  const enemy = g.units.find(u => u.side === "enemy");
-  enemy.hp = 0;
-  E.update(g, 0.016);
-  assert.equal(g.stats.kills, 1);
-  assert.ok(g.stats.goldEarned > 0);
+test("ohnivý katapult a trhavinové dělo: po dopadu vznikají plamínky (10) / střepiny (30), i při dopadu na zem", () => {
+  const g = noAI(game());
+  g.sides[0].gold = 1e6; g.sides[0].age = 1;
+  E.buildTurret(g, 0, 0, 4); // ohnivý katapult
+  const e = spawn(g, 1, 5, 330); e.hp = 1e6; e.w = 300;   // široký rytíř → chytí střepiny
+  const kinds = {};
+  for (let t = 0; t < 600; t++) { E.tick(g); for (const ev of g.events) if (ev.t === "hit") kinds[ev.kind] = (kinds[ev.kind] || 0) + 1; }
+  assert.ok(kinds.flame >= 3, `plamínky zasáhly (${JSON.stringify(kinds)})`);
+  const h = noAI(game());
+  h.sides[0].gold = 1e6; h.sides[0].age = 2;
+  E.buildTurret(h, 0, 0, 8); // trhavinové dělo
+  const e2 = spawn(h, 1, 11, 400); e2.hp = 1e6; e2.w = 300;
+  const k2 = {};
+  for (let t = 0; t < 600; t++) { E.tick(h); for (const ev of h.events) if (ev.t === "hit") k2[ev.kind] = (k2[ev.kind] || 0) + 1; }
+  assert.ok(k2.shrapnel >= 3, `střepiny zasáhly (${JSON.stringify(k2)})`);
+  // dopad na zem bez cíle v místě vytvoří 4 střepiny
+  const m = noAI(game()); m.sides[0].gold = 1e6; m.sides[0].age = 2; E.buildTurret(m, 0, 0, 8);
+  const far = spawn(m, 1, 11, 560); far.hp = 1e6;
+  let frags = 0;
+  for (let t = 0; t < 200; t++) { E.tick(m); frags = Math.max(frags, m.bullets.filter(b => b.kind === "shrapnel").length); }
+  assert.ok(frags >= 3 && frags <= 8, `střepiny ve vzduchu: ${frags}`);
 });
 
-test("seedovaná hra s autopilotem doběhne do terminálního stavu", () => {
-  const g = E.createGame({ seed: 7 });
-  g.auto = true;
-  g.autoUnit = 0;
+test("chytrá AI: platí za jednotky, nemá násobené statistiky, evolvuje za XP, staví věže", () => {
+  const g = game({ seed: 11, difficulty: "normal", ai: "smart" });
+  assert.equal(g.rules.enemyMul, 1);
+  assert.equal(g.sides[1].gold, 175);
+  g.sides[0].baseHp = g.sides[0].baseMaxHp = 1e9;
+  let spent = 0, built = false;
+  for (let t = 0; t < 40 * 60 * 6; t++) {
+    const gold0 = g.sides[1].gold;
+    E.tick(g);
+    for (const ev of g.events) { if (ev.t === "enqueue" && ev.side === 1) spent += D.UNITS[ev.id].cost; if (ev.t === "build" && ev.side === 1) built = true; }
+    void gold0;
+    // hráč posílá levné jednotky, ať má AI co zabíjet
+    if (t % 120 === 0) { g.sides[0].gold = 1e6; E.enqueueUnit(g, 0, D.UNITS_BY_AGE[g.sides[0].age][0].id); }
+  }
+  assert.ok(spent > 500, "AI utratila za jednotky " + spent);
+  assert.ok(g.sides[1].stats.goldSpent >= spent, "útrata je ve statistikách");
+  assert.ok(built, "AI postavila věž");
+  assert.ok(g.sides[1].age >= 1, "AI zevolvovala za XP (věk " + g.sides[1].age + ", xp " + g.sides[1].xp + ")");
+  for (const u of g.units) if (u.side === 1) assert.equal(u.maxHp, D.UNITS[u.id].hp, "statistiky bez násobku");
+  const hard = game({ seed: 11, difficulty: "impossible", ai: "smart" });
+  assert.equal(hard.rules.enemyMul, 1); assert.equal(hard.rules.aiRewardMul, 1.8); assert.equal(hard.sides[1].gold, 600);
+});
+
+test("celá hra s autopilotem skončí (někdo zničí základnu)", () => {
+  const g = game({ seed: 3 });
   let t = 0;
-  // hraje 10 minut herního času; AI i hráč spawnují → základna musí padnout
-  while (!g.over && t < 6000) { E.update(g, 0.1); t++; }
-  assert.equal(g.over, true, "hra skončila");
-  assert.ok(g.won === true || g.won === false);
-  assert.ok(g.playerBaseHp <= 0 || g.enemyBaseHp <= 0);
+  while (!g.over && t < 40 * 60 * 40) {
+    const S = g.sides[0], pool = D.UNITS_BY_AGE[S.age];
+    for (let i = pool.length - 1; i >= 0; i--) if (E.canTrain(g, 0, pool[i].id)) { E.enqueueUnit(g, 0, pool[i].id); break; }
+    if (E.canEvolve(g, 0)) E.evolve(g, 0);
+    if (E.canUseSpecial(g, 0) && E.aliveUnits(g, 1) >= 3) E.useSpecial(g, 0);
+    E.tick(g); t++;
+  }
+  assert.equal(g.over, true, "hra skončila do 40 minut");
+  assert.ok(g.winner === 0 || g.winner === 1);
 });

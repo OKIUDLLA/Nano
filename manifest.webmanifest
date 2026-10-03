@@ -1,0 +1,15 @@
+{
+  "name": "Věky Války – remake Age of War",
+  "short_name": "Věky Války",
+  "description": "Remake legendární hry Age of War (2007): projdi pěti věky a znič nepřátelskou základnu.",
+  "lang": "cs",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1d1813",
+  "theme_color": "#2b2320",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

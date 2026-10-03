@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AoW Audio Test</title>
+<style>
+  :root { --bg:#1b1a17; --fg:#eee5d2; --mut:#9b917f; --acc:#e0a040; --card:#26231f; --ok:#5fbf6a; --bad:#d65a5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; }
+  h1 { font-size:18px; margin:0 0 4px; } h2 { font-size:14px; color:var(--mut); margin:18px 0 8px; text-transform:uppercase; letter-spacing:.06em; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { background:var(--card); color:var(--fg); border:1px solid #3a352e; border-radius:6px; padding:8px 12px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--acc); } button.on { background:var(--acc); color:#1b1a17; border-color:var(--acc); }
+  label { display:flex; align-items:center; gap:8px; color:var(--mut); }
+  input[type=range] { width:160px; }
+  #status { font-family:ui-monospace, monospace; color:var(--mut); margin:6px 0 0; }
+  #status b { color:var(--fg); }
+  table { border-collapse:collapse; font-family:ui-monospace, monospace; font-size:12px; margin-top:8px; }
+  td, th { padding:2px 10px 2px 0; text-align:left; } td.ok { color:var(--ok); } td.bad { color:var(--bad); }
+  .grp { margin:4px 0 0; }
+</style>
+</head>
+<body>
+  <h1>Age of War – audio test bench</h1>
+  <p id="status">context: <b id="st-state">none</b> · voices: <b id="st-voices">0</b> · tracks: <b id="st-tracks">0</b> · <span id="st-hint">klikni kamkoliv pro spuštění zvuku</span></p>
+
+  <h2>SFX</h2>
+  <div id="sfx" class="row"></div>
+
+  <h2>Hudba</h2>
+  <div class="row" id="music">
+    <button data-age="0">0 · Stone</button>
+    <button data-age="1">1 · Castle</button>
+    <button data-age="2">2 · Renaissance</button>
+    <button data-age="3">3 · Modern</button>
+    <button data-age="4">4 · Future</button>
+    <button data-age="off">Off</button>
+    <label>Intenzita <input id="intensity" type="range" min="0" max="100" value="0" /> <span id="intensity-val">0.00</span></label>
+  </div>
+
+  <h2>Mixér</h2>
+  <div class="row">
+    <label>Master <input id="v-master" type="range" min="0" max="100" value="100" /></label>
+    <label>SFX <input id="v-sfx" type="range" min="0" max="100" value="100" /></label>
+    <label>Hudba <input id="v-music" type="range" min="0" max="100" value="100" /></label>
+    <label><input id="mute" type="checkbox" /> Mute</label>
+    <label>Pan <input id="pan" type="range" min="-100" max="100" value="0" /></label>
+    <label>Pitch <input id="pitch" type="range" min="50" max="200" value="100" /></label>
+    <button id="stopall">Stop all SFX</button>
+  </div>
+
+  <h2>Self-test (OfflineAudioContext)</h2>
+  <div class="row"><button id="selftest">Render všech SFX + 5 témat</button> <span id="selftest-sum" style="color:var(--mut)"></span></div>
+  <table id="selftest-out"></table>
+
+<script src="../js/audio.js"></script>
+<script>
+(() => {
+  const A = window.AoWAudio;
+  const $ = (id) => document.getElementById(id);
+
+  // SFX tlačítka
+  const sfxWrap = $("sfx");
+  for (const name of A.names()) {
+    const b = document.createElement("button");
+    b.textContent = name; b.dataset.sfx = name;
+    b.addEventListener("click", () => A.play(name, { pan: +$("pan").value / 100, pitch: +$("pitch").value / 100 }));
+    sfxWrap.appendChild(b);
+  }
+
+  // Hudba
+  const musicBtns = [...document.querySelectorAll("#music button")];
+  for (const b of musicBtns) b.addEventListener("click", () => {
+    const v = b.dataset.age;
+    A.setMusic(v === "off" ? null : +v);
+    musicBtns.forEach((x) => x.classList.toggle("on", x === b));
+  });
+  $("intensity").addEventListener("input", (e) => { const x = +e.target.value / 100; A.setIntensity(x); $("intensity-val").textContent = x.toFixed(2); });
+
+  // Mixér
+  const setVol = () => A.setVolume({ master: +$("v-master").value / 100, sfx: +$("v-sfx").value / 100, music: +$("v-music").value / 100 });
+  ["v-master", "v-sfx", "v-music"].forEach((id) => $(id).addEventListener("input", setVol));
+  $("mute").addEventListener("change", (e) => A.setMuted(e.target.checked));
+  $("stopall").addEventListener("click", () => A.stopAll());
+
+  // AudioContext smí startovat až po gestu
+  const kick = () => { A.resume().then(() => { $("st-hint").textContent = A.isReady() ? "běží" : "čeká na gesto"; }); };
+  window.addEventListener("pointerdown", kick);
+  window.addEventListener("keydown", kick);
+
+  setInterval(() => {
+    const s = A.__stats();
+    $("st-state").textContent = s.state; $("st-voices").textContent = s.voices; $("st-tracks").textContent = s.tracks;
+  }, 250);
+
+  // Self-test
+  $("selftest").addEventListener("click", async () => {
+    const out = $("selftest-out"); out.innerHTML = "<tr><th>name</th><th>s</th><th>peak</th><th>rms</th><th></th></tr>";
+    let fails = 0;
+    const list = [...A.names().map((n) => [n, 2.6]), ...A.themes().map((_, i) => ["music:" + i, 3])];
+    for (const [name, secs] of list) {
+      const r = await A.__renderTest(name, secs);
+      const ok = !r.error && r.peak >= 0.05 && r.peak <= 0.98 && r.rms > 0.0005;
+      if (!ok) fails++;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${name}</td><td>${secs}</td><td>${r.error ? "-" : r.peak.toFixed(3)}</td><td>${r.error ? "-" : r.rms.toFixed(4)}</td><td class="${ok ? "ok" : "bad"}">${r.error || (ok ? "ok" : "FAIL")}</td>`;
+      out.appendChild(tr);
+    }
+    $("selftest-sum").textContent = fails ? fails + " selhalo" : "vše OK (" + list.length + ")";
+  });
+
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>
