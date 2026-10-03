@@ -1,63 +1,88 @@
-# Věky Války ⚔️
+# Věky Války ⚔️ – remake legendární *Age of War*
 
-**Idle hra** ve stylu *Age of War* – běží přímo v prohlížeči, bez instalace.
-Herní logika je oddělená do testovatelného jádra, takže funkčnost je **doložena
-automatickými testy** (Node simulace + headless prohlížeč přes Playwright).
+Remake klasické flashové hry **Age of War** (Louissi / Max Games, 2007) postavený od nuly:
+HTML5 Canvas + vanilla JavaScript, **bez buildu, bez assetů, bez serveru** – stačí otevřít
+`index.html`. Veškerá grafika je kreslená procedurálně, veškerý zvuk i hudba se syntetizují
+ve WebAudio. Hra funguje offline jako PWA.
 
-![Ukázka hry](figs/screenshot.png)
+Pravidla, čísla a chování **Klasického** režimu jsou převzatá z dekompilovaného originálu
+(viz [docs/ORIGINAL.md](docs/ORIGINAL.md)) – 16 jednotek, 15 věží, 5 věků, 5 specialů,
+fronta výcviku, sloty věží, ekonomika „zlato jen za zabité“, časovaná AI nepřítele i tři
+obtížnosti (Normal / Harder / Impossible) jsou 1:1.
 
 ## Jak hrát
 
-Otevři `index.html` v prohlížeči (stačí dvojklik) – víc není potřeba.
+Otevři `index.html` (nebo hostuj složku jako statický web – pak funguje i instalace PWA).
 
-### Cíl
+- **Cíl:** přežij a znič nepřátelskou základnu vpravo dřív, než padne ta tvoje.
+- **Jednotky** (karty nebo klávesy 1–4) se řadí do fronty (5 míst), vycvičené jdou samy vpřed a bojují.
+- **Zlato** získáš jen za zabité nepřátele (130 % jejich ceny). **Zkušenosti** za zabité (2×) i vlastní padlé (0.5×).
+- **Evoluce** (Enter) – při dostatku XP postoupíš do dalšího věku: lepší jednotky, věže, special a HP základny navíc.
+- **Věže** – záložka Věže (Q/W/E), pak klik na plošinu základny. Další plošiny stojí 1000 / 3000 / 7500, prodej vrátí polovinu.
+- **Special** (Mezerník) – každý věk jiný: déšť meteorů, déšť šípů, léčivá aura, nálet, smrtící paprsek. Obnova 50 s.
+- **Základnu nejde opravit** – HP přibývá jen evolucí. Chraň ji za každou cenu!
 
-Znič nepřátelskou základnu (vpravo) dřív, než nepřítel zničí tu tvoji (vlevo).
+Další klávesy: `A` přidat slot · `S` prodej věže · `P` pauza · `+`/`-` rychlost 1×/2×/3× · `M` zvuk · `Esc` menu.
+Rozehraná hra se automaticky ukládá (tlačítko *Pokračovat* v menu).
 
-### Mechaniky
+## Protivníci a obtížnosti
 
-- **Zlato** 💰 získáváš pasivně a za poražené nepřátele → najímání jednotek a stavbu věží.
-- **Zkušenosti** ⭐ získáváš za poražené nepřátele → postup do dalšího věku.
-- **Věky** 🏛️ – 5 věků (Pravěk → Antika → Středověk → Moderní doba → Budoucnost),
-  každý s lepšími jednotkami a silnějšími věžemi.
-- **Jednotky** – každý věk má tři druhy: 🛡 boj zblízka, 🏹 střelci, 🐘 tank.
-- **Obranné věže** 🗼 – postav až 4 věže na základnu; samy střílí na nejbližšího nepřítele.
-  Cena roste s počtem věží, síla podle věku v době stavby.
-- **Meteor** ☄️ – speciální útok zraňující všechny nepřátele (cooldown 30 s).
-- **Automatické posílání** 🤖 – idle režim, hra sama posílá vybranou jednotku
-  (vyber ji hvězdičkou ★ na kartě).
-- **Ukládání** 💾 – postup se průběžně ukládá do `localStorage`; tlačítkem **Restart**
-  začneš novou hru.
+| Protivník | Popis |
+|---|---|
+| **Klasický** | přesný port AI originálu: jednotky zdarma, pevný rozvrh evolucí (každých 200 s) a věží, max. 6 jednotek naživu |
+| **Chytrý** | nová AI: platí za jednotky i věže, evolvuje za XP, posílá vlny podle složení tvé armády, používá special, umí Super vojáka |
+
+| Obtížnost | Klasický | Chytrý |
+|---|---|---|
+| Normální | jako originál | reakce 1.5 s, bez bonusu |
+| Těžší | nepřátelské jednotky ×1.3 HP a dmg | rychlejší reakce, +30 % zlata za killy, vyšší příjem |
+| Nemožná | ×2.0 (jako originál) | okamžité reakce, +80 % zlata, nejvyšší příjem, 4 věže |
+
+Chytrá AI má pevný příjem podle věku (klasická má jednotky zdarma – jinak by proti pasivnímu hráči
+vyhladověla); detaily a naměřené win-raty jsou v [docs/BALANCE.md](docs/BALANCE.md).
 
 ## Struktura projektu
 
 ```
-index.html            – stránka a HUD
-css/style.css         – vzhled
-js/engine.js          – herní JÁDRO (čistá logika, bez DOM; běží i v Node)
-js/game.js            – prezentace (Canvas render, vstupy, ukládání)
-tests/engine.test.mjs – testy jádra (node:test)
-tests/browser.test.mjs– headless test celé hry (Playwright)
+index.html             stránka a HUD
+css/style.css          vzhled (kreslené „dřevěné“ UI, responzivní)
+js/data.js             DATA – jednotky, věže, věky, specialy (čísla originálu)
+js/engine.js           JÁDRO – deterministická simulace 40 ticků/s, bez DOM, běží i v Node
+js/ai.js               chytrá AI (klasická je přímo v jádře)
+js/sprites/common.js   kreslicí knihovna + registr spritů (kontrakt v hlavičce)
+js/sprites/age0-4.js   procedurální sprity jednotek, věží, základen a pozadí pro každý věk
+js/render.js           renderer (interpolace mezi ticky, částice, efekty, třes obrazu)
+js/audio.js            syntetizované zvuky a 5 hudebních témat (WebAudio, bez souborů)
+js/ui.js, js/main.js   HUD, menu, vstupy, herní smyčka, ukládání
+sw.js, manifest.webmanifest, icon.svg   PWA
+tests/engine.test.mjs  testy jádra (node:test, bez závislostí)
+tests/browser.test.mjs testy celé hry v headless Chromiu (Playwright)
+tools/sim.mjs          simulační balanc (N her × strategie × AI × obtížnost)
+tools/sprite-viewer.html, tools/shot.mjs, tools/play.mjs, tools/audio-check.mjs   vývojové nástroje
+docs/ORIGINAL.md       referenční data originálu (z dekompilace SWF)
+docs/RESEARCH.md       rešerše (originál, pokračování, žánr, technika)
+docs/GDD.md            návrh hry – co a proč přidáváme nad originál
+docs/BALANCE.md        metodika a výsledky balancu
 ```
 
-Klíčový princip: **`js/engine.js` neobsahuje žádnou závislost na DOM** a používá
-deterministický seedovaný RNG. Díky tomu lze celou hru spustit a otestovat bez prohlížeče
-(`Engine.createGame({ seed })` → reprodukovatelný průběh).
+Klíčový princip: **`js/engine.js` neobsahuje nic z DOM** a používá seedovaný RNG. Stejný seed a
+stejné akce dají vždy stejný průběh – proto lze celou hru testovat a balancovat bez prohlížeče.
 
-## Testy
+## Testy a nástroje
 
 ```bash
-# logika jádra (žádné závislosti)
-npm test
-
-# celá hra v reálném prohlížeči (jednorázová příprava)
-npm install
-npx playwright install chromium
-npm run test:browser
+npm test                 # jádro (žádné závislosti)
+npm install              # jednorázově: Playwright
+npm run test:browser     # celá hra v headless Chromiu
+node tools/sim.mjs 20 40 all all           # balanc: 20 her, limit 40 min
+node tools/play.mjs out.png 20 3           # automatický hráč + screenshot
+node tools/shot.mjs "tools/sprite-viewer.html?age=2&freeze=0.4" out.png   # náhled spritů
 ```
 
-## Tipy
+Chromium pro Playwright se bere z `PLAYWRIGHT_CHROMIUM` (výchozí `/opt/pw-browsers/chromium`), jinak
+z instalace Playwrightu (`npx playwright install chromium`). CI (GitHub Actions) spouští obojí.
 
-- Zpočátku stav na levné jednotky a sbírej zkušenosti na první postup.
-- Kombinuj boj zblízka (drží linii) se střelci (pálí zezadu) a postav pár věží na obranu.
-- Nech zapnuté automatické posílání a soustřeď se na postup věky a meteor.
+## Poděkování
+
+Age of War vytvořil **Louissi** (Max Games Studios, 2007). Tento projekt je nekomerční pocta
+fanoušků; všechna původní grafika i zvuky byly nahrazeny vlastní procedurální tvorbou.

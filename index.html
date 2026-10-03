@@ -2,71 +2,155 @@
 <html lang="cs">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Věky Války – idle hra</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2b2320" />
+  <meta name="description" content="Věky Války – remake legendární hry Age of War (2007). Postav armádu, projdi pěti věky a znič nepřátelskou základnu. Běží přímo v prohlížeči." />
+  <title>Věky Války – remake Age of War</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="app">
-    <header id="hud">
-      <div class="hud-item">
-        <span class="hud-label">Věk</span>
-        <span id="age-name" class="hud-value">Pravěk</span>
-      </div>
-      <div class="hud-item">
-        <span class="hud-label">Zlato</span>
-        <span id="gold" class="hud-value gold">0</span>
-      </div>
-      <div class="hud-item">
-        <span class="hud-label">Zkušenosti</span>
-        <span id="xp" class="hud-value xp">0</span>
-      </div>
-      <div class="hud-actions">
-        <button id="evolve-btn" class="action-btn">Postoupit do dalšího věku</button>
-        <button id="tower-btn" class="action-btn tower">Postavit věž</button>
-        <button id="tower-up-btn" class="action-btn tower">Vylepšit věž</button>
-        <select id="special-type" class="difficulty-select">
-          <option value="meteor">☄️ Meteor</option>
-          <option value="heal">➕ Léčení</option>
-          <option value="freeze">❄️ Zmrazení</option>
-        </select>
-        <button id="special-btn" class="action-btn special">Meteor</button>
-        <label id="auto-toggle" class="auto-toggle">
-          <input type="checkbox" id="auto-check" /> Automaticky posílat
-        </label>
-        <label class="auto-toggle">Obtížnost
-          <select id="difficulty" class="difficulty-select">
-            <option value="easy">Lehká</option>
-            <option value="normal" selected>Střední</option>
-            <option value="hard">Těžká</option>
-          </select>
-        </label>
-        <button id="mute-btn" class="action-btn" title="Zvuk">🔊</button>
-        <button id="reset-btn" class="action-btn reset">Restart</button>
-      </div>
-    </header>
-
-    <div id="canvas-wrap">
-      <canvas id="game" width="960" height="380"></canvas>
-      <div id="overlay" class="hidden">
-        <div class="overlay-box">
-          <h1 id="overlay-title">Vítězství!</h1>
-          <p id="overlay-text"></p>
-          <button id="restart-btn" class="action-btn">Hrát znovu</button>
-        </div>
+<div id="app">
+  <header id="hud">
+    <div class="hud-group stats">
+      <div class="stat"><span class="lbl">Zlato</span><span id="gold" class="val gold">175</span></div>
+      <div class="stat"><span class="lbl">Zkušenosti</span><span id="xp" class="val xp">0</span></div>
+      <div class="stat age">
+        <span class="lbl">Věk</span><span id="age-name" class="val">Doba kamenná</span>
+        <div class="xpbar" title="Postup k dalšímu věku"><div id="xpbar-fill"></div></div>
       </div>
     </div>
+    <div class="hud-group actions">
+      <button id="btn-evolve" class="btn evolve" title="Postoupit do dalšího věku [Enter]">Evoluce</button>
+      <button id="btn-special" class="btn special" title="Speciální útok [Mezerník]">
+        <span class="ring"></span><span id="special-label">Déšť meteorů</span>
+      </button>
+    </div>
+    <div class="hud-group sys">
+      <button id="btn-speed" class="btn small" title="Rychlost hry [+]">1×</button>
+      <button id="btn-pause" class="btn small" title="Pauza [P]">⏸</button>
+      <button id="btn-sound" class="btn small" title="Zvuk [M]">🔊</button>
+      <button id="btn-menu" class="btn small" title="Menu [Esc]">☰</button>
+    </div>
+  </header>
 
-    <section id="shop">
-      <h2>Najmout jednotky</h2>
-      <div id="units"></div>
-      <p class="hint">Klikni na kartu pro najmutí jednotky. Hvězdičkou ★ vybereš jednotku pro automatické posílání.</p>
-    </section>
+  <div id="stage">
+    <canvas id="game" aria-label="Bojiště"></canvas>
+    <div id="toast" class="hidden"></div>
+    <div id="hint" class="hidden"></div>
+    <div id="pause-overlay" class="overlay hidden"><div class="box"><h2>Pauza</h2><p>Stiskni P nebo klikni pro pokračování.</p><button id="btn-resume" class="btn big">Pokračovat</button></div></div>
   </div>
 
-  <script src="js/engine.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/audio.js"></script>
-  <script src="js/game.js"></script>
+  <section id="panel">
+    <div class="tabs">
+      <button class="tab active" data-tab="units">Jednotky <kbd>1–4</kbd></button>
+      <button class="tab" data-tab="turrets">Věže <kbd>Q W E</kbd></button>
+    </div>
+    <div id="tab-units" class="tabpage">
+      <div id="unit-cards" class="cards"></div>
+      <div id="queue">
+        <div class="train"><div id="train-fill"></div><span id="train-label">Fronta výcviku je prázdná</span></div>
+        <div id="queue-slots"></div>
+      </div>
+    </div>
+    <div id="tab-turrets" class="tabpage hidden">
+      <div id="turret-cards" class="cards"></div>
+      <div class="turret-actions">
+        <button id="btn-slot" class="btn" title="Koupit další plošinu pro věž [A]">Přidat slot</button>
+        <button id="btn-sell" class="btn" title="Prodat věž za 50 % ceny [S]">Prodat věž</button>
+        <div id="turret-list"></div>
+      </div>
+    </div>
+  </section>
+  <div id="tooltip" class="hidden" role="tooltip"></div>
+
+  <!-- Hlavní menu -->
+  <div id="menu" class="screen">
+    <div class="box menu-box">
+      <h1 class="title">Věky Války</h1>
+      <p class="subtitle">remake legendární <b>Age of War</b> (Louissi, 2007)</p>
+      <div class="menu-row">
+        <label>Obtížnost
+          <select id="sel-difficulty">
+            <option value="normal">Normální</option>
+            <option value="harder">Těžší (nepřítel ×1.3)</option>
+            <option value="impossible">Nemožná (nepřítel ×2)</option>
+          </select>
+        </label>
+        <label>Protivník
+          <select id="sel-ai">
+            <option value="classic">Klasický (přesně jako originál)</option>
+            <option value="smart">Chytrý (platí za jednotky, staví podle situace, posílá vlny)</option>
+          </select>
+        </label>
+      </div>
+      <div class="menu-buttons">
+        <button id="btn-play" class="btn big primary">Nová hra</button>
+        <button id="btn-continue" class="btn big hidden">Pokračovat</button>
+        <button id="btn-howto" class="btn big">Jak hrát</button>
+        <button id="btn-options" class="btn big">Nastavení</button>
+      </div>
+      <p class="footer-note">Cíl: přežij a znič nepřátelskou základnu. Zlato získáš jen zabíjením nepřátel, zkušenosti za zabité i padlé jednotky. Pět věků, každý s vlastními jednotkami, věžemi a specialem.</p>
+    </div>
+  </div>
+
+  <div id="howto" class="screen hidden">
+    <div class="box">
+      <h2>Jak hrát</h2>
+      <ul class="howto-list">
+        <li><b>Jednotky</b> – klikni na kartu (nebo klávesy 1–4). Fronta má 5 míst, výcvik chvíli trvá. Jednotky jdou samy doprava a bojují.</li>
+        <li><b>Zlato</b> dostaneš jen za zabité nepřátele (130 % jejich ceny). <b>Zkušenosti</b> za zabité (2×) i za vlastní padlé (0.5×).</li>
+        <li><b>Evoluce</b> – při dostatku XP postoupíš do dalšího věku: silnější jednotky, věže i special; základna dostane HP navíc. XP se neodečítá.</li>
+        <li><b>Věže</b> – záložka Věže: kup věž a klikni na plošinu základny. Další plošiny stojí 1000 / 3000 / 7500. Prodej vrátí polovinu.</li>
+        <li><b>Special</b> – každý věk má vlastní (meteory, šípy, léčení, nálet, paprsek). Obnovuje se 50 s.</li>
+        <li><b>Základnu nejde opravit</b>, HP přibývá jen evolucí. Chraň ji za každou cenu!</li>
+        <li>Klávesy: 1–4 jednotky · Q/W/E věže · A slot · S prodej · Mezerník special · Enter evoluce · P pauza · +/- rychlost · M zvuk</li>
+      </ul>
+      <button class="btn big" data-close="howto">Zpět</button>
+    </div>
+  </div>
+
+  <div id="options" class="screen hidden">
+    <div class="box">
+      <h2>Nastavení</h2>
+      <label class="opt">Hlasitost efektů <input id="opt-sfx" type="range" min="0" max="100" value="80" /></label>
+      <label class="opt">Hlasitost hudby <input id="opt-music" type="range" min="0" max="100" value="60" /></label>
+      <label class="opt"><input id="opt-hpbars" type="checkbox" checked /> Zobrazovat ukazatele zdraví jednotek</label>
+      <label class="opt"><input id="opt-lowfx" type="checkbox" /> Méně efektů (slabší zařízení)</label>
+      <label class="opt"><input id="opt-motion" type="checkbox" /> Bez třesení obrazu</label>
+      <div class="menu-buttons">
+        <button id="btn-reset-save" class="btn">Smazat uloženou hru</button>
+        <button class="btn big" data-close="options">Zpět</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameover" class="screen hidden">
+    <div class="box">
+      <h2 id="go-title">Vítězství!</h2>
+      <p id="go-text"></p>
+      <table id="go-stats" class="stats-table"></table>
+      <div class="menu-buttons">
+        <button id="btn-again" class="btn big primary">Hrát znovu</button>
+        <button id="btn-go-menu" class="btn big">Hlavní menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/sprites/common.js"></script>
+<script src="js/sprites/age0.js"></script>
+<script src="js/sprites/age1.js"></script>
+<script src="js/sprites/age2.js"></script>
+<script src="js/sprites/age3.js"></script>
+<script src="js/sprites/age4.js"></script>
+<script src="js/render.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>

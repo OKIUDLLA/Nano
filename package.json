@@ -1,11 +1,16 @@
 {
-  "name": "veky-valky",
-  "version": "1.0.0",
-  "description": "Idle hra ve stylu Age of War (HTML + Canvas + JS) s testovatelným jádrem.",
+  "name": "veky-valky-remake",
+  "version": "2.0.0",
+  "description": "Věky Války – remake legendární hry Age of War (2007). HTML5 Canvas + vanilla JS, bez buildu, s testovatelným deterministickým jádrem.",
   "type": "commonjs",
+  "private": true,
   "scripts": {
     "test": "node --test tests/engine.test.mjs",
-    "test:browser": "node tests/browser.test.mjs"
+    "test:browser": "node --test tests/browser.test.mjs",
+    "test:all": "node --test tests/engine.test.mjs tests/browser.test.mjs",
+    "shot": "node tools/shot.mjs",
+    "play": "node tools/play.mjs",
+    "serve": "npx --yes serve -l 8080 ."
   },
   "devDependencies": {
     "playwright": "^1.56.1"

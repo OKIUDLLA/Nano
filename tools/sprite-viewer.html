@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<title>Sprite viewer – Age of War remake</title>
+<style>
+  body { margin: 0; background: #d9e4ef; font: 12px/1.3 system-ui, sans-serif; color: #223; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="../js/data.js"></script>
+<script src="../js/sprites/common.js"></script>
+<script src="../js/sprites/age0.js"></script>
+<script src="../js/sprites/age1.js"></script>
+<script src="../js/sprites/age2.js"></script>
+<script src="../js/sprites/age3.js"></script>
+<script src="../js/sprites/age4.js"></script>
+<script>
+/* Prohlížeč spritů pro vývoj a screenshoty.
+   URL parametry: ?age=0..4 (výchozí 0), &freeze=0.35 (zmrazí fázi animací), &scale=2, &unit=key (jen jedna jednotka)
+   Rozložení: pro každou jednotku věku řádek s pózami idle / walk / attack / shoot / shootwalk / die,
+   pak věže věku (3 úhly), základna (4 sloty) a pás pozadí. */
+const q = new URLSearchParams(location.search);
+const age = +(q.get("age") || 0);
+const freeze = q.has("freeze") ? +q.get("freeze") : null;
+const scale = +(q.get("scale") || 2);
+const only = q.get("unit");
+const D = window.AoWData, S = window.Sprites;
+const ageKey = D.AGES[age].key;
+const units = D.UNITS_BY_AGE[age].filter(u => !only || u.key === only);
+const turrets = D.TURRETS_BY_AGE[age];
+const POSES = ["idle", "walk", "attack", "shoot", "shootwalk", "die"];
+const cell = 120, rowH = 110;
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+const rows = units.length + 1 + 1;
+canvas.width = Math.max(1000, POSES.length * cell + 40) * scale;
+canvas.height = (rows * rowH + 340 + 470) * scale;
+canvas.style.width = canvas.width / scale + "px";
+
+function rngFor(seed) { let a = seed | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+function draw(now) {
+  const t = freeze !== null ? freeze * 10 : now / 1000;
+  const phase = freeze !== null ? freeze : (t % 1.2) / 1.2;
+  const walk = freeze !== null ? freeze : (t % 0.8) / 0.8;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.fillStyle = "#d9e4ef"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#223"; ctx.font = "bold 13px system-ui";
+  ctx.fillText(`Věk ${age}: ${D.AGES[age].name} – ${ageKey}`, 10, 16);
+  let y = 30;
+  units.forEach((u, i) => {
+    ctx.fillStyle = "#223"; ctx.font = "11px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(`${u.name} (${u.en}) w=${u.w} h=${u.h}`, 10, y + 12);
+    POSES.forEach((pose, j) => {
+      const x = 60 + j * cell, gy = y + rowH - 14;
+      // hitzóna
+      ctx.strokeStyle = "rgba(200,40,40,0.5)"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.strokeRect(x - u.w / 2, gy - u.h, u.w, u.h); ctx.setLineDash([]);
+      ctx.fillStyle = "#667"; ctx.font = "9px system-ui"; ctx.textAlign = "center"; ctx.fillText(pose, x, y + 24);
+      ctx.save(); ctx.translate(x, gy);
+      if (i % 2 === 1) ctx.scale(-1, 1); // každý druhý zrcadlově = jako nepřítel
+      const side = i % 2;
+      S.drawUnit(ctx, u.key, {
+        anim: pose, phase, hitFrac: pose === "attack" ? u.hitAt / u.period : (u.shootHitAt || 0) / (u.shootPeriod || 1),
+        walk: pose === "walk" || pose === "shootwalk" ? walk : 0,
+        t, hp: pose === "die" ? 0 : 0.7, dying: pose === "die" ? phase : 0,
+        side, team: S.PAL.team[side], w: u.w, h: u.h, rng: rngFor(u.id * 977 + 1),
+      });
+      ctx.restore();
+    });
+    y += rowH;
+  });
+  // věže
+  ctx.fillStyle = "#223"; ctx.font = "11px system-ui"; ctx.textAlign = "left"; ctx.fillText("Věže (úhly -30°, 0°, 25°; recoil animovaný)", 10, y + 12);
+  turrets.forEach((tw, i) => {
+    [-30, 0, 25].forEach((ang, j) => {
+      const x = 80 + i * 200 + j * 60, gy = y + 70;
+      ctx.fillStyle = "#8b6a3a"; ctx.fillRect(x - 24, gy, 48, 5);
+      ctx.save(); ctx.translate(x, gy);
+      S.drawTurret(ctx, tw.key, { angle: ang, recoil: freeze !== null ? freeze : Math.max(0, 1 - (t % 1) * 3), t });
+      ctx.restore();
+    });
+    ctx.fillStyle = "#223"; ctx.font = "9px system-ui"; ctx.textAlign = "left"; ctx.fillText(tw.name, 60 + i * 200, y + 95);
+  });
+  y += rowH;
+  // základna hráče a nepřítele
+  ctx.fillStyle = "#223"; ctx.font = "11px system-ui"; ctx.fillText("Základna (hráč, 4 sloty, 2 věže) / nepřítel (2 sloty, 60 % HP)", 10, y + 12);
+  const by = y + 320;
+  ctx.fillStyle = "#6a8a4a"; ctx.fillRect(0, by, 1000, 20);
+  [[140, 0, 4, [true, false, true, false], 1], [500, 1, 2, [true, true, false, false], 0.6]].forEach(([bx, side, slots, tur, hp]) => {
+    ctx.save(); ctx.translate(bx, by); if (side === 1) ctx.scale(-1, 1);
+    S.drawBase(ctx, ageKey, { age, side, slots, slotY: D.SLOT_Y, turrets: tur, hp, t, team: S.PAL.team[side] });
+    for (let s = 0; s < slots; s++) {
+      ctx.fillStyle = tur[s] ? "rgba(0,120,0,0.3)" : "rgba(0,0,0,0.15)";
+      ctx.fillRect(S.SLOT_X - 22, D.SLOT_Y[s] - 2, 44, 4);
+      if (tur[s]) { ctx.save(); ctx.translate(S.SLOT_X, D.SLOT_Y[s]); S.drawTurret(ctx, turrets[s % turrets.length].key, { angle: -10, recoil: 0, t }); ctx.restore(); }
+    }
+    ctx.restore();
+  });
+  y += 340;
+  // pozadí
+  ctx.save(); ctx.translate(0, y); ctx.beginPath(); ctx.rect(0, 0, 1000, 450); ctx.clip();
+  S.drawBackground(ctx, ageKey, { age, t, layerShift: f => 0, camX: 0, w: 1000, h: 450 });
+  ctx.restore();
+  ctx.fillStyle = "#223"; ctx.font = "11px system-ui"; ctx.fillText("Pozadí 1000×450", 10, y - 4);
+  if (freeze === null) requestAnimationFrame(draw);
+}
+draw(0);
+window.__ready = true;
+</script>
+</body>
+</html>

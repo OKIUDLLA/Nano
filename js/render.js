@@ -1,763 +1,369 @@
 /* ============================================================
-   Věky Války – vykreslovací vrstva (Render)
-   Veškerá grafika: parallax pozadí, animované jednotky, základny,
-   efekty a částice. Čistý Canvas, bez obrázkových assetů.
-   API:  Render.scene(ctx, game, dt, time)
+   Age of War – remake: RENDERER (Canvas 2D)
+   Kreslí stav jádra. Nic nepočítá o hře – jen čte state a state.events.
+   - Interpoluje polohy mezi ticky (40 Hz simulace → plynulých 60+ fps).
+   - Nepřátelské sprity zrcadlí (sprity se kreslí vždy "doprava").
+   - Vlastní částice, plovoucí texty, záblesky zásahů, třes obrazu.
    ============================================================ */
 (function (global) {
   "use strict";
 
-  const E = global.Engine;
-  const { W, H, BASE_W, GROUND_Y, BASE_MAX_HP } = E;
+  const D = global.AoWData, S = global.Sprites, E = global.AoWEngine;
+  const { WORLD_W, GROUND_Y, SKY_H, AGES, UNITS, TURRETS, SLOT_Y, BASE_CENTER, UNIT_DEATH_TICKS, TPS } = D;
+  const H = S.H;
 
-  // ---------- Palety pozadí podle věku ----------
-  const BACKDROPS = [
-    { top: "#3b2f22", bot: "#7a5733", sun: "#ffcf9e", hillA: "#3d3220", hillB: "#2c2517", night: false },
-    { top: "#2c3a2e", bot: "#69803f", sun: "#fff2c4", hillA: "#3a4a2a", hillB: "#28341c", night: false },
-    { top: "#28324c", bot: "#5a6788", sun: "#e6eeff", hillA: "#3a4357", hillB: "#2a3140", night: false },
-    { top: "#1d2431", bot: "#49546a", sun: "#d2dbe6", hillA: "#333c4a", hillB: "#262d38", night: false },
-    { top: "#0a1124", bot: "#202b46", sun: "#7ad6ff", hillA: "#15203c", hillB: "#0d1328", night: true },
-  ];
-
-  // ---------- Pomocné ----------
-  function hexToRgb(h) {
-    const n = parseInt(h.slice(1), 16);
-    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  }
-  function shade(h, amt) {
-    const c = hexToRgb(h);
-    const f = (v) => Math.max(0, Math.min(255, Math.round(v + amt)));
-    return `rgb(${f(c.r)},${f(c.g)},${f(c.b)})`;
-  }
-  function rgba(h, a) {
-    const c = hexToRgb(h);
-    return `rgba(${c.r},${c.g},${c.b},${a})`;
-  }
-  function roundRect(ctx, x, y, w, h, r) {
-    if (w < 0) { x += w; w = -w; }
-    r = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  function create(canvas) {
+    const ctx = canvas.getContext("2d");
+    const R = {
+      canvas, ctx,
+      zoom: 1, camX: 0, viewW: WORLD_W, viewH: SKY_H, dpr: 1,
+      prev: new WeakMap(),       // objekt → {x,y} z předchozího ticku
+      flash: new Map(),          // uid → zbývající čas záblesku (s)
+      recoil: new Map(),         // "side:slot" → čas od výstřelu (s)
+      particles: [], floats: [], beams: [], planes: [], healAura: [0, 0],
+      shake: 0, shakeX: 0, shakeY: 0,
+      time: 0, lastAge: [-1, -1],
+      showHpBars: true, reducedMotion: false,
+      off: document.createElement("canvas"),
+      hoverSlot: null, placingTurret: null, sellMode: false,
+      lowFx: false,
+    };
+    R.offCtx = R.off.getContext("2d");
+    resize(R);
+    return R;
   }
 
-  // ---------- Vnitřní stav vykreslování ----------
-  let clouds = null;
-  let stars = null;
-  let hillsCache = null;
-  let particles = [];
-  let prevUnits = new Set();
-  const lastPos = new Map(); // ref -> {x, color, size, side}
-
-  function rnd(seed) { // malý deterministický generátor pro statické pozadí
-    let s = seed >>> 0;
-    return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  // ---------- Velikost a kamera ----------
+  function resize(R) {
+    const rect = R.canvas.getBoundingClientRect();
+    const dpr = Math.min(2, global.devicePixelRatio || 1);
+    const w = Math.max(320, Math.round(rect.width)), h = Math.max(200, Math.round(rect.height));
+    R.canvas.width = Math.round(w * dpr); R.canvas.height = Math.round(h * dpr);
+    R.dpr = dpr; R.cssW = w; R.cssH = h;
+    // svět 1000×450 se vejde celý na šířku; na úzkých displejích se dá posouvat (camX)
+    R.zoom = Math.max(w / WORLD_W, h / SKY_H);
+    R.viewW = w / R.zoom; R.viewH = h / R.zoom;
+    clampCam(R);
   }
-
-  function initBackground() {
-    const r = rnd(98765);
-    clouds = [];
-    for (let i = 0; i < 6; i++) {
-      clouds.push({ x: r() * W, y: 20 + r() * 90, s: 0.6 + r() * 1.1, v: 4 + r() * 8 });
+  function clampCam(R) {
+    R.camX = Math.max(0, Math.min(WORLD_W - R.viewW, R.camX));
+    R.camY = Math.max(0, SKY_H - R.viewH);
+  }
+  function toWorld(R, cssX, cssY) {
+    return { x: cssX / R.zoom + R.camX, y: cssY / R.zoom + R.camY };
+  }
+  function slotAt(R, state, side, wx, wy) {
+    const bx = side === 0 ? S.SLOT_X : WORLD_W - S.SLOT_X;
+    for (let s = 0; s < state.sides[side].slots; s++) {
+      const sy = GROUND_Y + SLOT_Y[s];
+      if (Math.abs(wx - bx) < 34 && wy > sy - 40 && wy < sy + 14) return s;
     }
-    stars = [];
-    for (let i = 0; i < 60; i++) {
-      stars.push({ x: r() * W, y: r() * (GROUND_Y - 40), s: r() * 1.6 + 0.3, t: r() * 6 });
-    }
-    // dvě vrstvy kopců jako pole výšek
-    hillsCache = [makeHills(31, 60, 18), makeHills(57, 95, 26)];
-  }
-  function makeHills(seed, baseY, amp) {
-    const r = rnd(seed);
-    const pts = [];
-    const step = 40;
-    for (let x = -step; x <= W + step; x += step) {
-      pts.push({ x, y: GROUND_Y - baseY - r() * amp });
-    }
-    return pts;
+    return null;
   }
 
-  // ============================================================
-  //  POZADÍ
-  // ============================================================
-  function drawBackground(ctx, game, time) {
-    const bd = BACKDROPS[game.age];
-
-    const sky = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    sky.addColorStop(0, bd.top);
-    sky.addColorStop(1, bd.bot);
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, GROUND_Y);
-
-    // hvězdy (noční věk)
-    if (bd.night) {
-      for (const st of stars) {
-        const tw = 0.5 + 0.5 * Math.sin(time * 2 + st.t);
-        ctx.fillStyle = `rgba(255,255,255,${0.25 + tw * 0.6})`;
-        ctx.fillRect(st.x, st.y, st.s, st.s);
+  // ---------- Hooky z herní smyčky ----------
+  function beforeTick(R, state) {
+    for (const u of state.units) R.prev.set(u, { x: u.x });
+    for (const b of state.bullets) R.prev.set(b, { x: b.x, y: b.y });
+    for (const fx of state.specials) if (fx.x !== undefined) R.prev.set(fx, { x: fx.x });
+  }
+  function onEvents(R, state, events) {
+    for (const ev of events) {
+      switch (ev.t) {
+        case "hit": {
+          R.flash.set(ev.uid, 0.09);
+          const u = E.findUnit(state, ev.uid);
+          const col = u && UNITS[u.id].key === "tank" || (u && (UNITS[u.id].age === 4 || UNITS[u.id].key === "warmachine")) ? "#ffd27a" : (u && UNITS[u.id].key === "dino" ? "#c43b2a" : "#d13b2a");
+          burst(R, ev.x, ev.y, ev.kind === "shot" || ev.kind === "fast" ? 5 : 4, col, 1.6, 50);
+          if (ev.kind === "oil") burst(R, ev.x, ev.y, 3, "#2a1d0f", 1.2, 25);
+          break;
+        }
+        case "hitbase": burst(R, ev.x, GROUND_Y - 40 - Math.random() * 60, 6, "#a0a0a0", 2, 40); shake(R, 1.5); break;
+        case "death": {
+          R.flash.delete(ev.uid);
+          floatText(R, "+" + ev.reward, ev.x, GROUND_Y - 60, ev.side === 1 ? "#ffd84a" : "#ff8a8a", ev.side === 1);
+          burst(R, ev.x, GROUND_Y - 25, 10, "#5a3a2a", 2, 70);
+          break;
+        }
+        case "shot": R.recoil.set(ev.side + ":" + ev.slot, 0.0001); break;
+        case "impact": {
+          if (ev.kind === "ground") burst(R, ev.x, ev.y, 5, "#b9a27a", 1.6, 40, -1);
+          else if (ev.kind === "explosion" || ev.kind === "bomb") { burst(R, ev.x, ev.y, 18, "#ff9a3a", 3, 110, 0); burst(R, ev.x, ev.y, 12, "#4a4a4a", 4, 60, -2); shake(R, ev.kind === "bomb" ? 4 : 3); }
+          else if (ev.kind === "meteors") { burst(R, ev.x, ev.y, 14, "#ff8a2a", 3, 100, 0); burst(R, ev.x, ev.y, 8, "#5a4a40", 3, 60, -2); shake(R, 3); }
+          else if (ev.kind === "arrows") burst(R, ev.x, ev.y, 3, "#c9b48a", 1.2, 30);
+          else if (ev.kind === "oil") burst(R, ev.x, ev.y, 2, "#2a1d0f", 1.5, 20);
+          break;
+        }
+        case "ray": R.beams.push({ x: ev.x, t: 0 }); burst(R, ev.x, GROUND_Y - 10, 16, "#9af7ff", 2.5, 120, 0); shake(R, 2); break;
+        case "special": {
+          if (ev.key === "airstrike") R.planes.push({ side: ev.side, t: 0 });
+          if (ev.key === "heal") R.healAura[ev.side] = 15;
+          if (ev.key === "meteors" || ev.key === "arrows") shake(R, 2);
+          break;
+        }
+        case "shake": shake(R, ev.amount * 0.6); break;
+        case "evolve": R.lastAge[ev.side] = -1; burst(R, BASE_CENTER[ev.side], GROUND_Y - 100, 40, "#ffe27a", 3, 160, 0); break;
+        case "build": burst(R, ev.side === 0 ? S.SLOT_X : WORLD_W - S.SLOT_X, GROUND_Y + SLOT_Y[ev.slot], 12, "#d9c6a0", 2, 60, -1); break;
+        case "spawn": burst(R, ev.x, GROUND_Y - 4, 4, "#c9b48a", 1.4, 30, -1); break;
       }
     }
-
-    // slunce / měsíc
-    const sunX = W * 0.78, sunY = 70;
-    const g = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 60);
-    g.addColorStop(0, rgba(bd.sun, 0.95));
-    g.addColorStop(1, rgba(bd.sun, 0));
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(sunX, sunY, 60, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = bd.sun;
-    ctx.beginPath(); ctx.arc(sunX, sunY, 22, 0, Math.PI * 2); ctx.fill();
-
-    // mraky (pohyb řeší step())
-    for (const c of clouds) {
-      drawCloud(ctx, c.x, c.y, c.s, bd.night ? "rgba(180,200,230,0.18)" : "rgba(255,255,255,0.5)");
-    }
-
-    // kopce – dvě vrstvy
-    drawHills(ctx, hillsCache[0], bd.hillB);
-    drawHills(ctx, hillsCache[1], bd.hillA);
-
-    // země
-    const gr = ctx.createLinearGradient(0, GROUND_Y, 0, H);
-    gr.addColorStop(0, shade(BACKDROPS[game.age].hillA, 28));
-    gr.addColorStop(1, shade(BACKDROPS[game.age].hillB, -10));
-    ctx.fillStyle = gr;
-    ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-    // travnatý okraj
-    ctx.fillStyle = "rgba(0,0,0,.18)";
-    ctx.fillRect(0, GROUND_Y, W, 3);
-    ctx.fillStyle = "rgba(255,255,255,.05)";
-    ctx.fillRect(0, GROUND_Y + 3, W, 2);
-    // textura – kamínky
-    const rr = rnd(404);
-    ctx.fillStyle = "rgba(0,0,0,.12)";
-    for (let i = 0; i < 60; i++) {
-      ctx.fillRect(rr() * W, GROUND_Y + 8 + rr() * (H - GROUND_Y - 10), 2 + rr() * 2, 2);
+  }
+  function shake(R, amount) { if (!R.reducedMotion) R.shake = Math.min(10, R.shake + amount); }
+  function burst(R, x, y, n, color, size, speed, gravity) {
+    if (R.lowFx) n = Math.ceil(n / 2);
+    if (R.particles.length > 600) return;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.8);
+      R.particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - speed * 0.3, g: gravity === undefined ? 320 : gravity * 60, size: size * (0.6 + Math.random() * 0.8), color, life: 0.35 + Math.random() * 0.4, t: 0 });
     }
   }
-  function drawCloud(ctx, x, y, s, col) {
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
-    ctx.arc(x + 16 * s, y + 4 * s, 11 * s, 0, Math.PI * 2);
-    ctx.arc(x - 16 * s, y + 4 * s, 10 * s, 0, Math.PI * 2);
-    ctx.arc(x, y + 6 * s, 16 * s, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  function drawHills(ctx, pts, col) {
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, GROUND_Y);
-    for (const p of pts) ctx.lineTo(p.x, p.y);
-    ctx.lineTo(pts[pts.length - 1].x, GROUND_Y);
-    ctx.closePath();
-    ctx.fill();
-  }
+  function floatText(R, text, x, y, color, big) { R.floats.push({ text, x, y, color, t: 0, life: 1.1, big }); }
 
-  // ============================================================
-  //  ZÁKLADNY
-  // ============================================================
-  function drawBase(ctx, game, side, hp, age, time) {
-    const isP = side === "player";
-    const x0 = isP ? 0 : W - BASE_W;
-    const main = isP ? "#3a5a86" : "#86413a";
-    const top = GROUND_Y - 130;
-    const bw = BASE_W - 12;
-    const bx = x0 + 6;
-    const ratio = Math.max(0, hp / BASE_MAX_HP);
+  // ---------- Hlavní kreslení ----------
+  function draw(R, state, alpha, dt) {
+    const ctx = R.ctx;
+    R.time += dt;
+    updateFx(R, dt);
+    const age0 = state.sides[0].age, age1 = state.sides[1].age;
+    const ageKey = AGES[age0].key;
 
-    // tělo věže s gradientem
-    const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
-    grad.addColorStop(0, shade(main, 18));
-    grad.addColorStop(0.5, main);
-    grad.addColorStop(1, shade(main, -28));
-    ctx.fillStyle = grad;
-    ctx.fillRect(bx, top, bw, 130);
-
-    // cimbuří
-    ctx.fillStyle = shade(main, -14);
-    const merlons = 4;
-    for (let i = 0; i < merlons; i++) {
-      ctx.fillRect(bx + i * (bw / merlons), top - 12, bw / merlons - 3, 12);
-    }
-    // brána
-    ctx.fillStyle = "rgba(0,0,0,.45)";
-    roundRect(ctx, x0 + BASE_W / 2 - 13, GROUND_Y - 42, 26, 42, 8);
-    ctx.fill();
-    ctx.strokeStyle = shade(main, 26); ctx.lineWidth = 2; ctx.stroke();
-    // okna (svítí)
-    ctx.fillStyle = ratio > 0.25 ? "rgba(255,220,140,.85)" : "rgba(120,90,60,.5)";
-    for (let r2 = 0; r2 < 2; r2++) {
-      ctx.fillRect(x0 + BASE_W / 2 - 18, top + 26 + r2 * 28, 8, 12);
-      ctx.fillRect(x0 + BASE_W / 2 + 10, top + 26 + r2 * 28, 8, 12);
-    }
-
-    // praskliny při poškození
-    if (ratio < 0.6) {
-      ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(bx + bw * 0.3, top + 10);
-      ctx.lineTo(bx + bw * 0.45, top + 50);
-      ctx.lineTo(bx + bw * 0.35, top + 90);
-      if (ratio < 0.3) {
-        ctx.moveTo(bx + bw * 0.7, top + 30);
-        ctx.lineTo(bx + bw * 0.55, top + 70);
-        ctx.lineTo(bx + bw * 0.7, top + 110);
-      }
-      ctx.stroke();
-    }
-
-    // stožár + vlající vlajka
-    const poleX = x0 + BASE_W / 2;
-    ctx.strokeStyle = "#cfd6e0"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(poleX, top - 12); ctx.lineTo(poleX, top - 44); ctx.stroke();
-    const fdir = isP ? 1 : -1;
-    const wave = Math.sin(time * 4) * 3;
-    ctx.fillStyle = isP ? "#5b9bff" : "#ff6b5b";
-    ctx.beginPath();
-    ctx.moveTo(poleX, top - 44);
-    ctx.lineTo(poleX + fdir * 20, top - 40 + wave);
-    ctx.lineTo(poleX, top - 30);
-    ctx.closePath();
-    ctx.fill();
-
-    // odznak věku
-    ctx.fillStyle = "rgba(255,255,255,.92)";
-    ctx.font = "bold 15px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Věk " + (age + 1), poleX, top + 78);
-
-    // ukazatel zdraví
-    const by = top - 64;
-    ctx.fillStyle = "rgba(0,0,0,.5)";
-    roundRect(ctx, bx, by, bw, 8, 4); ctx.fill();
-    ctx.fillStyle = isP ? "#4a90e2" : "#e2574a";
-    roundRect(ctx, bx, by, Math.max(2, bw * ratio), 8, 4); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.2)"; ctx.lineWidth = 1;
-    roundRect(ctx, bx, by, bw, 8, 4); ctx.stroke();
-
-    // kouř při těžkém poškození
-    if (ratio < 0.35) {
-      const pf = (Math.sin(time * 2 + (isP ? 0 : 3)) + 1) / 2;
-      ctx.fillStyle = `rgba(60,60,60,${0.15 + pf * 0.15})`;
-      ctx.beginPath();
-      ctx.arc(poleX + 8, top - 50 - pf * 14, 8 + pf * 6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // ============================================================
-  //  VĚŽE
-  // ============================================================
-  function drawTower(ctx, game, tw, time) {
-    const isP = tw.side === "player";
-    const x = isP ? BASE_W - 6 : W - BASE_W + 6;
-    const y = GROUND_Y - 150 - tw.slot * 24;
-    const col = isP ? "#4a90e2" : "#e2574a";
-
-    // míří na nejbližšího nepřítele (jen vizuálně)
-    const fireX = isP ? BASE_W : W - BASE_W;
-    const dir = isP ? 1 : -1;
-    let target = null, td = Infinity;
-    for (const o of game.units) {
-      if (o.side === tw.side) continue;
-      const d = (o.x - fireX) * dir;
-      if (d >= 0 && d <= tw.range && d < td) { td = d; target = o; }
-    }
-    let ang = 0;
-    if (target) {
-      ang = Math.atan2((GROUND_Y - 20) - y, (target.x - x));
-    } else {
-      ang = isP ? 0 : Math.PI;
-    }
-
-    // podstavec
-    ctx.fillStyle = shade(col, -40);
-    roundRect(ctx, x - 11, y - 2, 22, 20, 4); ctx.fill();
-    ctx.fillStyle = col;
-    roundRect(ctx, x - 9, y, 18, 14, 4); ctx.fill();
-    // hlaveň
+    // kamera + třes
+    ctx.setTransform(R.dpr, 0, 0, R.dpr, 0, 0);
+    ctx.clearRect(0, 0, R.cssW, R.cssH);
     ctx.save();
-    ctx.translate(x, y + 6);
-    ctx.rotate(ang);
-    ctx.fillStyle = "#2b313c";
-    roundRect(ctx, 0, -3, 18, 6, 2); ctx.fill();
-    ctx.fillStyle = shade(col, 30);
-    ctx.fillRect(14, -3, 4, 6);
-    ctx.restore();
-    // úroveň věže (tečky)
-    const lvl = tw.level || 1;
-    for (let i = 0; i < lvl; i++) {
-      ctx.fillStyle = "#ffd86a";
-      ctx.beginPath();
-      ctx.arc(x - 6 + i * 6, y - 6, 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    ctx.scale(R.zoom, R.zoom);
+    ctx.translate(-R.camX + R.shakeX, -R.camY + R.shakeY);
 
-    // jiskra ve hlavni krátce po výstřelu
-    const firing = game.effects.some(e => e.type === "shot" && e.tower && Math.abs(e.x1 - fireX) < 2);
-    if (firing) {
-      ctx.fillStyle = "rgba(255,230,150,.9)";
-      ctx.beginPath();
-      ctx.arc(x + Math.cos(ang) * 20, y + 6 + Math.sin(ang) * 20, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
+    // pozadí (podle věku hráče – svět se vyvíjí s ním)
+    S.drawBackground(ctx, ageKey, { age: age0, t: R.time, camX: R.camX, w: WORLD_W, h: SKY_H,
+      layerShift: f => (R.camX - (WORLD_W - R.viewW) / 2) * (1 - f) });
 
-  // ============================================================
-  //  JEDNOTKY
-  // ============================================================
-  // Zjistí, zda jednotka právě útočí (cíl/základna v dosahu) a fázi úderu 0..1
-  function attackInfo(game, u) {
-    const dir = u.side === "player" ? 1 : -1;
-    let nearest = null, nd = Infinity;
-    for (const o of game.units) {
-      if (o.side === u.side) continue;
-      const ahead = (o.x - u.x) * dir;
-      if (ahead < -u.size) continue;
-      if (ahead < nd) { nd = ahead; nearest = o; }
-    }
-    const baseEdge = u.side === "player" ? (W - BASE_W) : BASE_W;
-    const baseDist = (baseEdge - u.x) * dir;
-    const attacking = (nearest && nd <= u.range) || (!nearest && baseDist <= u.range);
-    // cd jede od interval k 0; hned po úderu je atk≈1, před úderem ≈0
-    const atk = attacking ? Math.max(0, Math.min(1, u.cd / (u.interval || 1))) : 0;
-    return { attacking, atk };
-  }
-
-  function drawUnit(ctx, game, u, time) {
-    const dir = u.side === "player" ? 1 : -1;
-    const { attacking, atk } = attackInfo(game, u);
-    const phase = time * 9 + u.x * 0.25;
-    const walk = attacking ? Math.sin(time * 3) * 0.18 : Math.sin(phase);
-    const bob = attacking ? 0 : Math.abs(Math.cos(phase)) * 2;
-    const lunge = atk * 3; // výpad vpřed v okamžiku úderu
-
-    // stín
-    ctx.fillStyle = "rgba(0,0,0,.28)";
-    ctx.beginPath();
-    ctx.ellipse(u.x, GROUND_Y - 1, u.size * 0.6, u.size * 0.22, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.save();
-    ctx.translate(u.x, GROUND_Y - bob);
-    ctx.scale(dir, 1); // postavy kreslíme čelem doprava, otočíme podle strany
-    ctx.translate(lunge, 0);
-
-    if (u.kind === "beast") drawBeast(ctx, u, walk, atk);
-    else if (u.kind === "ram" || u.kind === "tank") drawVehicle(ctx, u, walk, time, atk);
-    else drawHumanoid(ctx, u, walk, time, atk);
-
-    ctx.restore();
-
-    drawUnitHealth(ctx, u);
-  }
-
-  function drawUnitHealth(ctx, u) {
-    const ratio = Math.max(0, u.hp / u.maxHp);
-    const w = Math.max(16, u.size * 1.2);
-    const x = u.x - w / 2;
-    const y = GROUND_Y - u.size * 2.0 - 8;
-    ctx.fillStyle = "rgba(0,0,0,.55)";
-    roundRect(ctx, x, y, w, 4, 2); ctx.fill();
-    ctx.fillStyle = ratio > 0.5 ? "#5dd35d" : ratio > 0.25 ? "#e6c34c" : "#e2574a";
-    roundRect(ctx, x, y, w * ratio, 4, 2); ctx.fill();
-  }
-
-  // --- Humanoidní postava (meč, luk, prak, puška, laser, robot) ---
-  function drawHumanoid(ctx, u, walk, time, atk) {
-    const s = u.size;
-    const robot = u.kind === "robot" || u.kind === "titan";
-    const body = u.color;
-    const dk = shade(body, -45);
-    const lt = shade(body, 30);
-    const skin = robot ? shade(body, 50) : "#e8c4a0";
-
-    const legLen = s * 0.55;
-    const hipY = -legLen;
-    const torsoH = s * 0.7;
-    const torsoY = hipY - torsoH;
-    const headR = s * 0.3;
-
-    // nohy
-    ctx.strokeStyle = dk;
-    ctx.lineWidth = Math.max(3, s * 0.22);
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.12, hipY); ctx.lineTo(-s * 0.12 + walk * s * 0.18, 0);
-    ctx.moveTo(s * 0.12, hipY); ctx.lineTo(s * 0.12 - walk * s * 0.18, 0);
-    ctx.stroke();
-
-    // trup
-    const g = ctx.createLinearGradient(0, torsoY, 0, hipY);
-    g.addColorStop(0, lt); g.addColorStop(1, dk);
-    ctx.fillStyle = g;
-    roundRect(ctx, -s * 0.32, torsoY, s * 0.64, torsoH + s * 0.1, s * 0.18);
-    ctx.fill();
-
-    // hlava + helma
-    ctx.fillStyle = skin;
-    ctx.beginPath(); ctx.arc(0, torsoY - headR * 0.4, headR, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = robot ? shade(body, -10) : shade(body, -20);
-    ctx.beginPath();
-    ctx.arc(0, torsoY - headR * 0.55, headR, Math.PI, Math.PI * 2);
-    ctx.fill();
-    if (robot) { // oko robota
-      ctx.fillStyle = "#ff5d5d";
-      ctx.fillRect(headR * 0.1, torsoY - headR * 0.55, headR * 0.7, headR * 0.3);
-    }
-
-    // ruka + zbraň
-    drawWeapon(ctx, u, s, torsoY, time, walk, atk || 0);
-  }
-
-  function drawWeapon(ctx, u, s, torsoY, time, walk, atk) {
-    const armY = torsoY + s * 0.18;
-    // při útoku se zbraň rozmáchne dopředu úměrně fázi úderu
-    const swing = Math.sin(time * 6 + u.x) * 0.12 + atk * 0.9;
-    ctx.strokeStyle = "#caa888";
-    ctx.lineWidth = Math.max(2.5, s * 0.16);
-    ctx.lineCap = "round";
-
-    switch (u.kind) {
-      case "club": {
-        ctx.beginPath(); ctx.moveTo(s * 0.2, armY); ctx.lineTo(s * 0.5, armY - s * 0.2); ctx.stroke();
-        ctx.fillStyle = "#8a5a36";
-        ctx.beginPath(); ctx.arc(s * 0.55, armY - s * 0.28, s * 0.18, 0, Math.PI * 2); ctx.fill();
-        break;
-      }
-      case "sword": {
-        // štít
-        ctx.fillStyle = shade(u.color, -30);
-        roundRect(ctx, -s * 0.5, armY - s * 0.1, s * 0.22, s * 0.5, 3); ctx.fill();
-        // meč
-        ctx.save(); ctx.translate(s * 0.25, armY); ctx.rotate(-0.5 + swing);
-        ctx.strokeStyle = "#dfe6f0"; ctx.lineWidth = s * 0.12;
-        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s * 0.6, 0); ctx.stroke();
-        ctx.strokeStyle = "#8a6a3a"; ctx.lineWidth = s * 0.2;
-        ctx.beginPath(); ctx.moveTo(-s * 0.05, -s * 0.12); ctx.lineTo(-s * 0.05, s * 0.12); ctx.stroke();
+    // základny
+    for (const side of [0, 1]) {
+      const SS = state.sides[side];
+      ctx.save(); ctx.translate(BASE_CENTER[side], GROUND_Y); if (side === 1) ctx.scale(-1, 1);
+      S.drawBase(ctx, AGES[SS.age].key, { age: SS.age, side, slots: SS.slots, slotY: SLOT_Y, turrets: SS.turrets.map(t => !!t),
+        hp: Math.max(0, SS.baseHp / SS.baseMaxHp), t: R.time, team: S.PAL.team[side] });
+      // věže
+      for (let s = 0; s < SS.slots; s++) {
+        const tw = SS.turrets[s];
+        if (!tw) continue;
+        const def = TURRETS[tw.id];
+        const rec = R.recoil.get(side + ":" + s);
+        const recoil = rec ? Math.max(0, 1 - rec / 0.25) : 0;
+        const angle = side === 0 ? tw.angle : 180 - tw.angle;
+        ctx.save(); ctx.translate(S.SLOT_X, SLOT_Y[s]);
+        S.drawTurret(ctx, def.key, { angle, recoil, t: R.time, side });
         ctx.restore();
-        break;
       }
-      case "soldier": {
-        // puška u boku
-        ctx.strokeStyle = "#2b313c"; ctx.lineWidth = s * 0.14;
-        ctx.beginPath(); ctx.moveTo(-s * 0.1, armY); ctx.lineTo(s * 0.5, armY - s * 0.05); ctx.stroke();
-        break;
-      }
-      case "sling": {
-        ctx.strokeStyle = "#7a5a36"; ctx.lineWidth = s * 0.1;
-        ctx.save(); ctx.translate(s * 0.3, armY - s * 0.1); ctx.rotate(Math.sin(time * 8 + u.x) * 0.8);
-        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, s * 0.4); ctx.stroke();
-        ctx.fillStyle = "#9a9a9a"; ctx.beginPath(); ctx.arc(0, s * 0.45, s * 0.12, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-        break;
-      }
-      case "bow": {
-        ctx.strokeStyle = "#7a4a26"; ctx.lineWidth = s * 0.1;
-        ctx.beginPath(); ctx.arc(s * 0.35, armY, s * 0.45, -1.1, 1.1); ctx.stroke();
-        ctx.strokeStyle = "rgba(230,230,230,.8)"; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(s * 0.35 + Math.cos(-1.1) * s * 0.45, armY + Math.sin(-1.1) * s * 0.45);
-        ctx.lineTo(s * 0.35 + Math.cos(1.1) * s * 0.45, armY + Math.sin(1.1) * s * 0.45);
-        ctx.stroke();
-        break;
-      }
-      case "rifle": {
-        ctx.strokeStyle = "#23282f"; ctx.lineWidth = s * 0.16;
-        ctx.beginPath(); ctx.moveTo(-s * 0.1, armY); ctx.lineTo(s * 0.7, armY - s * 0.08); ctx.stroke();
-        ctx.fillStyle = "#3a4150"; ctx.fillRect(s * 0.1, armY - s * 0.02, s * 0.18, s * 0.12);
-        if (atk > 0.55) { // záblesk u ústí
-          ctx.fillStyle = `rgba(255,220,120,${atk})`;
-          ctx.beginPath(); ctx.arc(s * 0.74, armY - s * 0.08, s * 0.16 * atk, 0, Math.PI * 2); ctx.fill();
-        }
-        break;
-      }
-      case "laser": {
-        ctx.strokeStyle = "#39424f"; ctx.lineWidth = s * 0.18;
-        ctx.beginPath(); ctx.moveTo(-s * 0.05, armY); ctx.lineTo(s * 0.6, armY - s * 0.05); ctx.stroke();
-        const glow = 0.5 + 0.5 * Math.sin(time * 10 + u.x);
-        const r = s * 0.12 * (1 + atk);
-        ctx.fillStyle = `rgba(110,214,207,${0.5 + glow * 0.5})`;
-        ctx.beginPath(); ctx.arc(s * 0.62, armY - s * 0.05, r, 0, Math.PI * 2); ctx.fill();
-        break;
-      }
-      case "robot":
-      case "titan": {
-        ctx.fillStyle = "#39424f";
-        roundRect(ctx, s * 0.1, armY - s * 0.12, s * 0.55, s * 0.24, 3); ctx.fill();
-        ctx.fillStyle = shade(u.color, 40);
-        ctx.fillRect(s * 0.6, armY - s * 0.06, s * 0.1, s * 0.12);
-        break;
-      }
+      ctx.restore();
+      // zvýraznění slotů při stavbě
+      if (side === 0 && R.placingTurret !== null) drawSlotHighlights(R, state);
+      if (side === 0 && R.sellMode) drawSellHighlights(R, state);
     }
-  }
 
-  // --- Zvíře (mamut / slon) ---
-  function drawBeast(ctx, u, walk, atk) {
-    const s = u.size;
-    const body = u.color, dk = shade(body, -40), lt = shade(body, 24);
-    // nohy
-    ctx.strokeStyle = dk; ctx.lineWidth = s * 0.22; ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.5, -s * 0.5); ctx.lineTo(-s * 0.5 + walk * s * 0.15, 0);
-    ctx.moveTo(-s * 0.15, -s * 0.5); ctx.lineTo(-s * 0.15 - walk * s * 0.15, 0);
-    ctx.moveTo(s * 0.2, -s * 0.5); ctx.lineTo(s * 0.2 + walk * s * 0.15, 0);
-    ctx.moveTo(s * 0.55, -s * 0.5); ctx.lineTo(s * 0.55 - walk * s * 0.15, 0);
-    ctx.stroke();
-    // tělo
-    const g = ctx.createLinearGradient(0, -s * 1.4, 0, -s * 0.4);
-    g.addColorStop(0, lt); g.addColorStop(1, dk);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(0, -s * 0.85, s * 0.8, s * 0.55, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // hlava
-    ctx.fillStyle = body;
-    ctx.beginPath(); ctx.arc(s * 0.7, -s * 0.85, s * 0.42, 0, Math.PI * 2); ctx.fill();
-    // chobot
-    ctx.strokeStyle = body; ctx.lineWidth = s * 0.22;
-    ctx.beginPath();
-    ctx.moveTo(s * 1.0, -s * 0.8);
-    ctx.quadraticCurveTo(s * 1.25, -s * 0.55, s * 1.1, -s * 0.15);
-    ctx.stroke();
-    // kly
-    ctx.strokeStyle = "#efe6d0"; ctx.lineWidth = s * 0.1;
-    ctx.beginPath();
-    ctx.moveTo(s * 0.95, -s * 0.65);
-    ctx.quadraticCurveTo(s * 1.2, -s * 0.5, s * 1.25, -s * 0.7);
-    ctx.stroke();
-    // oko
-    ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(s * 0.78, -s * 0.95, s * 0.06, 0, Math.PI * 2); ctx.fill();
-  }
+    // jednotky: nejdřív umírající, pak živé seřazené zezadu dopředu (podle uid – starší vzadu? ne, podle x)
+    const dying = [], alive = [];
+    for (const u of state.units) (u.dead ? dying : alive).push(u);
+    for (const u of dying) drawUnit(R, state, u, alpha);
+    for (const u of alive) drawUnit(R, state, u, alpha);
 
-  // --- Vozidlo (beranidlo / tank) ---
-  function drawVehicle(ctx, u, walk, time, atk) {
-    const s = u.size;
-    const body = u.color, dk = shade(body, -40), lt = shade(body, 22);
-    const isTank = u.kind === "tank";
-    atk = atk || 0;
+    // střely
+    for (const b of state.bullets) {
+      const p = R.prev.get(b);
+      const bx = p ? p.x + (b.x - p.x) * alpha : b.x, by = p ? p.y + (b.y - p.y) * alpha : b.y;
+      S.drawProjectile(ctx, Object.assign({}, b, { x: bx, y: by }), R.time);
+      if (b.kind === "sky" && b.sub === "meteors" && !R.lowFx) R.particles.push({ x: bx, y: by, vx: 0, vy: 0, g: 0, size: 3 + Math.random() * 3, color: "rgba(255,140,40,0.6)", life: 0.25, t: 0 });
+    }
 
-    // pásy / kola
-    ctx.fillStyle = "#1f242c";
-    roundRect(ctx, -s * 0.7, -s * 0.34, s * 1.4, s * 0.34, s * 0.16); ctx.fill();
-    ctx.fillStyle = "#3a4150";
-    const wheels = 4;
-    for (let i = 0; i < wheels; i++) {
-      const wx = -s * 0.52 + i * (s * 1.04 / (wheels - 1));
-      ctx.beginPath(); ctx.arc(wx, -s * 0.17, s * 0.12, 0, Math.PI * 2); ctx.fill();
-    }
-    // korba
-    const g = ctx.createLinearGradient(0, -s * 1.0, 0, -s * 0.3);
-    g.addColorStop(0, lt); g.addColorStop(1, dk);
-    ctx.fillStyle = g;
-    roundRect(ctx, -s * 0.6, -s * 0.9, s * 1.2, s * 0.6, s * 0.1); ctx.fill();
+    // efekty specialů
+    drawSpecialFx(R, state, alpha);
 
-    if (isTank) {
-      // věž + hlaveň (se zpětným rázem při výstřelu)
-      ctx.fillStyle = shade(body, -10);
-      roundRect(ctx, -s * 0.3, -s * 1.15, s * 0.6, s * 0.34, s * 0.1); ctx.fill();
-      const recoil = atk * s * 0.18;
-      ctx.fillStyle = "#2b313c";
-      ctx.fillRect(s * 0.2 - recoil, -s * 1.02, s * 0.7, s * 0.12);
-      if (atk > 0.55) {
-        ctx.fillStyle = `rgba(255,210,110,${atk})`;
-        ctx.beginPath(); ctx.arc(s * 0.92, -s * 0.96, s * 0.18 * atk, 0, Math.PI * 2); ctx.fill();
-      }
-    } else {
-      // beranidlo – kláda s kovovou hlavou
-      ctx.fillStyle = "#6a4a2c";
-      roundRect(ctx, -s * 0.2, -s * 0.75, s * 1.0, s * 0.2, s * 0.08); ctx.fill();
-      ctx.fillStyle = "#9aa0a8";
-      ctx.beginPath(); ctx.arc(s * 0.85, -s * 0.65, s * 0.18, 0, Math.PI * 2); ctx.fill();
-      // střecha
-      ctx.fillStyle = shade(body, -20);
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.6, -s * 0.9); ctx.lineTo(0, -s * 1.15); ctx.lineTo(s * 0.6, -s * 0.9);
-      ctx.closePath(); ctx.fill();
-    }
-  }
-
-  // ============================================================
-  //  EFEKTY (projektily, jiskry, meteor)
-  // ============================================================
-  function drawEffects(ctx, game) {
-    for (const e of game.effects) {
-      if (e.type === "shot") {
-        const maxT = e.tower ? 0.12 : 0.12;
-        const p = 1 - Math.max(0, e.ttl) / maxT;
-        const yA = e.tower ? GROUND_Y - 150 : GROUND_Y - 22;
-        const yB = GROUND_Y - 22;
-        if (e.tower) {
-          // zářivý paprsek
-          ctx.strokeStyle = "rgba(255,235,140,.85)";
-          ctx.lineWidth = 2.5;
-          ctx.beginPath(); ctx.moveTo(e.x1, yA); ctx.lineTo(e.x2, yB); ctx.stroke();
-        } else {
-          // letící projektil
-          const x = e.x1 + (e.x2 - e.x1) * p;
-          const y = yA + (yB - yA) * p - Math.sin(p * Math.PI) * 14; // mírný oblouk
-          const col = e.side === "player" ? "#cfe4ff" : "#ffd0c4";
-          ctx.strokeStyle = rgba(e.side === "player" ? "#9ec8ff" : "#ff9e8e", 0.7);
-          ctx.lineWidth = 2;
-          const dx = (e.x2 - e.x1) >= 0 ? 1 : -1;
-          ctx.beginPath(); ctx.moveTo(x - dx * 8, y); ctx.lineTo(x, y); ctx.stroke();
-          ctx.fillStyle = col;
-          ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
-        }
-      } else if (e.type === "hit") {
-        const a = Math.max(0, e.ttl) / 0.15;
-        ctx.strokeStyle = `rgba(255,230,150,${a})`;
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 6; i++) {
-          const an = (i / 6) * Math.PI * 2;
-          const r1 = 3, r2 = 9 * (1 - a) + 4;
-          ctx.beginPath();
-          ctx.moveTo(e.x + Math.cos(an) * r1, GROUND_Y - 20 + Math.sin(an) * r1);
-          ctx.lineTo(e.x + Math.cos(an) * r2, GROUND_Y - 20 + Math.sin(an) * r2);
-          ctx.stroke();
-        }
-      } else if (e.type === "heal") {
-        const a = Math.max(0, e.ttl) / 0.7;
-        ctx.fillStyle = `rgba(90,220,120,${a * 0.4})`;
-        ctx.fillRect(0, 0, W / 2, H);
-        ctx.fillStyle = `rgba(180,255,200,${a})`;
-        ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText("+", BASE_W / 2 + 4, GROUND_Y - 140);
-      } else if (e.type === "freeze") {
-        const a = Math.max(0, e.ttl) / 0.7;
-        ctx.fillStyle = `rgba(120,200,255,${a * 0.35})`;
-        ctx.fillRect(W / 2, 0, W / 2, H);
-      } else if (e.type === "meteor") {
-        const a = Math.max(0, e.ttl) / 0.7;
-        // záblesk
-        ctx.fillStyle = `rgba(255,120,40,${a * 0.35})`;
-        ctx.fillRect(W / 2, 0, W / 2, H);
-        // padající meteory
-        const prog = 1 - a;
-        for (let i = 0; i < 5; i++) {
-          const mx = W / 2 + 60 + i * 80;
-          const my = -60 + prog * (GROUND_Y + 80) + i * 30;
-          const grd = ctx.createLinearGradient(mx - 24, my - 40, mx, my);
-          grd.addColorStop(0, "rgba(255,180,80,0)");
-          grd.addColorStop(1, "rgba(255,170,60,.9)");
-          ctx.strokeStyle = grd; ctx.lineWidth = 4;
-          ctx.beginPath(); ctx.moveTo(mx - 24, my - 40); ctx.lineTo(mx, my); ctx.stroke();
-          ctx.fillStyle = "#ffd27a";
-          ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2); ctx.fill();
-        }
-      }
-    }
-  }
-
-  // ============================================================
-  //  ČÁSTICE (obláčky při smrti jednotek)
-  // ============================================================
-  function spawnDeath(x, color, side) {
-    for (let i = 0; i < 10; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const sp = 20 + Math.random() * 60;
-      particles.push({
-        x, y: GROUND_Y - 16 - Math.random() * 14,
-        vx: Math.cos(a) * sp, vy: -Math.random() * 70 - 10,
-        life: 0.6 + Math.random() * 0.4, max: 1,
-        col: i % 3 === 0 ? color : (side === "player" ? "#9ec8ff" : "#ff9e8e"),
-        r: 2 + Math.random() * 2.5,
-      });
-    }
-    // prach
-    for (let i = 0; i < 6; i++) {
-      particles.push({
-        x: x + (Math.random() - 0.5) * 16, y: GROUND_Y - 4,
-        vx: (Math.random() - 0.5) * 30, vy: -Math.random() * 20,
-        life: 0.5, max: 0.5, col: "rgba(150,140,120,1)", r: 3 + Math.random() * 3, dust: true,
-      });
-    }
-  }
-  function updateParticles(game, dt) {
-    // detekce úmrtí: jednotky, které zmizely od minulého snímku
-    const current = new Set(game.units);
-    for (const ref of prevUnits) {
-      if (!current.has(ref)) {
-        const lp = lastPos.get(ref);
-        if (lp) spawnDeath(lp.x, lp.color, lp.side);
-      }
-    }
-    lastPos.clear();
-    for (const u of game.units) lastPos.set(u, { x: u.x, color: u.color, side: u.side });
-    prevUnits = current;
-
-    for (const p of particles) {
-      p.life -= dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.vy += 180 * dt; // gravitace
-    }
-    particles = particles.filter(p => p.life > 0);
-  }
-  function drawParticles(ctx) {
-    for (const p of particles) {
-      const a = Math.max(0, p.life / p.max);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = p.col;
-      if (p.dust) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-      } else {
-        ctx.fillRect(p.x - p.r / 2, p.y - p.r / 2, p.r, p.r);
-      }
+    // částice a texty
+    for (const p of R.particles) {
+      const a = 1 - p.t / p.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.5 + a * 0.5), 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
-  }
-
-  // ============================================================
-  //  PLOVOUCÍ TEXTY
-  // ============================================================
-  function drawFloats(ctx, game) {
-    ctx.font = "bold 14px sans-serif";
     ctx.textAlign = "center";
-    for (const f of game.floats) {
-      ctx.globalAlpha = Math.min(1, f.ttl);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(0,0,0,.6)";
-      ctx.strokeText(f.text, f.x, f.y);
-      ctx.fillStyle = f.color;
-      ctx.fillText(f.text, f.x, f.y);
+    for (const f of R.floats) {
+      const a = f.t < f.life * 0.6 ? 1 : 1 - (f.t - f.life * 0.6) / (f.life * 0.4);
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.font = (f.big ? "bold 15px" : "bold 12px") + " system-ui, sans-serif";
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.strokeText(f.text, f.x, f.y);
+      ctx.fillStyle = f.color; ctx.fillText(f.text, f.x, f.y);
     }
     ctx.globalAlpha = 1;
+
+    // HP základen
+    for (const side of [0, 1]) drawBaseHp(R, state, side);
+
+    ctx.restore();
+    void age1;
   }
 
-  // ---------- Posun mraků (volá se z update smyčky) ----------
-  function step(dt) {
-    if (!clouds) initBackground();
-    for (const c of clouds) {
-      c.x += c.v * dt;
-      if (c.x - 40 > W) c.x = -40;
+  function drawUnit(R, state, u, alpha) {
+    const ctx = R.ctx, def = UNITS[u.id];
+    const p = R.prev.get(u);
+    const x = p ? p.x + (u.x - p.x) * alpha : u.x;
+    const dying = u.dead ? u.deathT / UNIT_DEATH_TICKS : 0;
+    const fade = u.dead ? Math.max(0, 1 - Math.max(0, (dying - 0.6) / 0.4)) : 1;
+    const period = u.anim === "attack" ? def.period : u.anim === "shoot" ? def.shootPeriod : u.anim === "shootwalk" ? def.walkShootPeriod : 0;
+    const hitAt = u.anim === "attack" ? def.hitAt : u.anim === "shoot" ? def.shootHitAt : u.anim === "shootwalk" ? def.walkShootHitAt : 0;
+    const phase = period ? Math.min(1, (u.animT + alpha) / period) : 0;
+    const walk = ((x + u.uid * 13) / 42) % 1;   // fáze kroku roste s uraženou vzdáleností
+    const params = {
+      anim: u.anim, phase, hitFrac: period ? hitAt / period : 0.5, walk: walk < 0 ? walk + 1 : walk,
+      t: R.time, hp: Math.max(0, u.hp / u.maxHp), dying, side: u.side, team: S.PAL.team[u.side],
+      w: u.w, h: u.h, rng: rngFor(u.uid),
+    };
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.translate(x, GROUND_Y);
+    if (u.side === 1) ctx.scale(-1, 1);
+    // léčivá aura
+    if (!u.dead && R.healAura[u.side] > 0) {
+      ctx.save(); ctx.globalAlpha = 0.35 + 0.15 * Math.sin(R.time * 6);
+      ctx.fillStyle = H.radial(ctx, 0, -u.h / 2, 2, u.h * 0.8, [[0, "rgba(120,255,160,0.9)"], [1, "rgba(120,255,160,0)"]]);
+      ctx.beginPath(); ctx.ellipse(0, -u.h / 2, u.w * 0.9, u.h * 0.8, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+    S.drawUnit(ctx, def.key, params);
+    ctx.restore();
+    // záblesk zásahu: sprite znovu do offscreenu, přebarvit bíle
+    const fl = R.flash.get(u.uid);
+    if (fl > 0 && !u.dead && !R.lowFx) {
+      const pad = 12, w = Math.ceil(u.w + pad * 2), h = Math.ceil(u.h * 1.25 + pad);
+      const off = R.off, oc = R.offCtx;
+      if (off.width !== w * 2 || off.height !== h * 2) { off.width = w * 2; off.height = h * 2; }
+      oc.setTransform(2, 0, 0, 2, 0, 0); oc.clearRect(0, 0, w, h);
+      oc.save(); oc.translate(w / 2, h - 2); if (u.side === 1) oc.scale(-1, 1);
+      S.drawUnit(oc, def.key, params); oc.restore();
+      oc.globalCompositeOperation = "source-atop"; oc.fillStyle = "rgba(255,255,255,0.85)"; oc.fillRect(0, 0, w, h);
+      oc.globalCompositeOperation = "source-over";
+      ctx.save(); ctx.globalAlpha = Math.min(1, fl / 0.09) * 0.9;
+      ctx.drawImage(off, x - w / 2, GROUND_Y - h + 2, w, h); ctx.restore();
+    }
+    // HP bar (jen poškozené živé jednotky)
+    if (R.showHpBars && !u.dead && u.hp < u.maxHp - 0.5) {
+      const bw = Math.max(22, Math.min(60, u.w)), by = GROUND_Y - u.h - 10;
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x - bw / 2 - 1, by - 1, bw + 2, 5);
+      const frac = Math.max(0, u.hp / u.maxHp);
+      ctx.fillStyle = frac > 0.5 ? "#5ad65a" : frac > 0.25 ? "#f2c94c" : "#e74c3c";
+      ctx.fillRect(x - bw / 2, by, bw * frac, 3);
     }
   }
 
-  // ============================================================
-  //  HLAVNÍ VSTUP
-  // ============================================================
-  function scene(ctx, game, dt, time) {
-    if (!clouds) initBackground();
-    step(dt);
-    drawBackground(ctx, game, time);
-    drawBase(ctx, game, "player", game.playerBaseHp, game.age, time);
-    drawBase(ctx, game, "enemy", game.enemyBaseHp, game.enemyAge, time);
-    for (const tw of game.towers) drawTower(ctx, game, tw, time);
-
-    const sorted = [...game.units].sort((a, b) => a.x - b.x);
-    for (const u of sorted) drawUnit(ctx, game, u, time);
-
-    drawEffects(ctx, game);
-    updateParticles(game, dt);
-    drawParticles(ctx);
-    drawFloats(ctx, game);
+  // HP základen: vodorovné pruhy v horních rozích světa (nepřekrývají základny ani vysoké hrady)
+  function drawBaseHp(R, state, side) {
+    const ctx = R.ctx, SS = state.sides[side];
+    const frac = Math.max(0, SS.baseHp / SS.baseMaxHp);
+    const w = 190, h = 12, y = R.camY + 10;   // relativně k viditelnému výřezu (kamera je ukotvená ke dnu světa)
+    const x = side === 0 ? R.camX + 10 : R.camX + R.viewW - 10 - w;
+    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = "#2a2a2a"; ctx.fillRect(x, y, w, h);
+    const col = frac > 0.5 ? "#5ad65a" : frac > 0.25 ? "#f2c94c" : "#e74c3c";
+    ctx.fillStyle = col;
+    if (side === 0) ctx.fillRect(x, y, w * frac, h); else ctx.fillRect(x + w * (1 - frac), y, w * frac, h);
+    ctx.fillStyle = S.PAL.team[side]; ctx.fillRect(side === 0 ? x - 2 : x + w - 2, y - 2, 4, h + 4);
+    if (frac < 0.25 && Math.sin(R.time * 8) > 0) { ctx.strokeStyle = "#ff4a3a"; ctx.lineWidth = 2; ctx.strokeRect(x - 3, y - 3, w + 6, h + 6); }
+    ctx.fillStyle = "#fff"; ctx.font = "bold 10px system-ui, sans-serif"; ctx.textAlign = side === 0 ? "left" : "right";
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    const label = `${side === 0 ? "Tvoje základna" : "Nepřítel"} ${Math.max(0, Math.round(SS.baseHp))} / ${SS.baseMaxHp}`;
+    const tx = side === 0 ? x : x + w;
+    ctx.strokeText(label, tx, y + h + 12); ctx.fillText(label, tx, y + h + 12);
   }
 
-  global.Render = { scene };
+  function drawSlotHighlights(R, state) {
+    const ctx = R.ctx, SS = state.sides[0];
+    for (let s = 0; s < SS.slots; s++) {
+      const x = S.SLOT_X, y = GROUND_Y + SLOT_Y[s];
+      const free = !SS.turrets[s];
+      const pulse = 0.5 + 0.5 * Math.sin(R.time * 5);
+      ctx.save(); ctx.globalAlpha = free ? 0.55 + 0.3 * pulse : 0.25;
+      ctx.strokeStyle = free ? "#7cff7c" : "#ff6a6a"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.strokeRect(x - 28, y - 36, 56, 44); ctx.setLineDash([]);
+      if (free && R.hoverSlot === s) { ctx.fillStyle = "rgba(124,255,124,0.25)"; ctx.fillRect(x - 28, y - 36, 56, 44); }
+      ctx.restore();
+    }
+  }
+  function drawSellHighlights(R, state) {
+    const ctx = R.ctx, SS = state.sides[0];
+    for (let s = 0; s < SS.slots; s++) {
+      if (!SS.turrets[s]) continue;
+      const x = S.SLOT_X, y = GROUND_Y + SLOT_Y[s];
+      ctx.save(); ctx.globalAlpha = R.hoverSlot === s ? 0.9 : 0.5;
+      ctx.strokeStyle = "#ffcc4a"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.strokeRect(x - 28, y - 36, 56, 44); ctx.setLineDash([]); ctx.restore();
+    }
+  }
+
+  function drawSpecialFx(R, state, alpha) {
+    const ctx = R.ctx;
+    // letadlo náletu
+    for (const fx of state.specials) {
+      if (fx.key !== "airstrike") continue;
+      const p = R.prev.get(fx); const x = p ? p.x + (fx.x - p.x) * alpha : fx.x;
+      ctx.save(); ctx.translate(x, 200 + Math.sin(R.time * 3) * 3); if (fx.side === 1) ctx.scale(-1, 1);
+      drawPlane(ctx, R.time, S.PAL.team[fx.side]);
+      ctx.restore();
+    }
+    // paprsky
+    for (const b of R.beams) {
+      const a = 1 - b.t / 0.35;
+      ctx.save(); ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = H.grad(ctx, b.x - 14, 0, b.x + 14, 0, [[0, "rgba(120,240,255,0)"], [0.5, "rgba(220,255,255,0.95)"], [1, "rgba(120,240,255,0)"]]);
+      ctx.fillRect(b.x - 14 * (0.5 + a), -20, 28 * (0.5 + a), GROUND_Y + 20);
+      ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillRect(b.x - 3, -20, 6, GROUND_Y + 20);
+      ctx.restore();
+    }
+  }
+  function drawPlane(ctx, t, team) {
+    // kreslený bombardér
+    ctx.save();
+    H.ellipse(ctx, 0, 0, 34, 9, "#8a9aa8", "#2b2320", 1.5);
+    H.poly(ctx, [[-6, -2], [-30, -22], [-20, -22], [6, -2]], "#7a8a98", "#2b2320", 1.5);
+    H.poly(ctx, [[-4, 2], [-18, 16], [-8, 16], [8, 2]], "#7a8a98", "#2b2320", 1.5);
+    H.poly(ctx, [[-30, -4], [-40, -18], [-34, -18], [-22, -6]], team, "#2b2320", 1.5);
+    H.circle(ctx, 14, -3, 4, "#c9eaff", "#2b2320", 1);
+    ctx.save(); ctx.translate(36, 0); ctx.rotate(t * 40); H.line(ctx, -8, 0, 8, 0, "#333", 2); H.line(ctx, 0, -8, 0, 8, "#333", 2); ctx.restore();
+    ctx.restore();
+  }
+
+  function updateFx(R, dt) {
+    for (const p of R.particles) { p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.y > GROUND_Y + 2) { p.y = GROUND_Y + 2; p.vy *= -0.3; p.vx *= 0.7; } }
+    R.particles = R.particles.filter(p => p.t < p.life);
+    for (const f of R.floats) { f.t += dt; f.y -= (28 - 20 * (f.t / f.life)) * dt; }
+    R.floats = R.floats.filter(f => f.t < f.life);
+    for (const b of R.beams) b.t += dt;
+    R.beams = R.beams.filter(b => b.t < 0.35);
+    for (const [k, v] of R.flash) { const n = v - dt; if (n <= 0) R.flash.delete(k); else R.flash.set(k, n); }
+    for (const [k, v] of R.recoil) { const n = v + dt; if (n > 0.4) R.recoil.delete(k); else R.recoil.set(k, n); }
+    R.healAura[0] = Math.max(0, R.healAura[0] - dt); R.healAura[1] = Math.max(0, R.healAura[1] - dt);
+    if (R.shake > 0) {
+      R.shake = Math.max(0, R.shake - dt * 18);
+      R.shakeX = (Math.random() * 2 - 1) * R.shake; R.shakeY = (Math.random() * 2 - 1) * R.shake * 0.6;
+    } else { R.shakeX = R.shakeY = 0; }
+  }
+
+  function rngFor(seed) { let a = seed * 7919 | 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+  // Ikona jednotky / věže do malého canvasu (pro UI karty)
+  function drawIcon(canvas, kind, key, def, side) {
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width, h = canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, w, h);
+    if (kind === "unit") {
+      const sc = Math.min((w - 8) / Math.max(def.w, 30), (h - 8) / Math.max(def.h, 30));
+      ctx.translate(w / 2, h - 4); ctx.scale(sc, sc);
+      S.drawUnit(ctx, key, { anim: "idle", phase: 0, hitFrac: 0.5, walk: 0, t: 0.3, hp: 1, dying: 0, side: side || 0, team: S.PAL.team[side || 0], w: def.w, h: def.h, rng: rngFor(def.id + 1) });
+    } else {
+      const sc = Math.min((w - 8) / 52, (h - 8) / 44);
+      ctx.translate(w / 2 - 2 * sc, h - 8); ctx.scale(sc, sc);
+      S.drawTurret(ctx, key, { angle: -15, recoil: 0, t: 0.3, side: 0 });
+    }
+  }
+
+  global.AoWRender = { create, resize, draw, beforeTick, onEvents, toWorld, slotAt, drawIcon, floatText, shake };
 })(typeof window !== "undefined" ? window : globalThis);
